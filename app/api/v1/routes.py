@@ -110,123 +110,6 @@ def get_impact_analyzer() -> ImpactAnalyzer:
         )
 
 
-@router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_tests(
-    request: AnalyzeRequest, test_analyzer: TestAnalyzer = Depends(get_analyzer)
-) -> AnalyzeResponse:
-    """
-    Analyze pytest test files for quality issues.
-
-    This endpoint accepts test file content and returns detected issues
-    with fix suggestions. Analysis can use rule engine only, LLM only,
-    or a hybrid approach.
-
-    Args:
-        request: Analysis request containing test files and configuration
-        test_analyzer: Injected TestAnalyzer instance
-
-    Returns:
-        Analysis response with detected issues and metrics
-
-    Raises:
-        HTTPException: If analysis fails or request is invalid
-    """
-    try:
-        # Validate request
-        if not request.files:
-            raise HTTPException(
-                status_code=400, detail="No files provided for analysis"
-            )
-
-        if len(request.files) > MAX_FILES_PER_REQUEST:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Too many files (max {MAX_FILES_PER_REQUEST})",
-            )
-
-        # Run analysis
-        result = await test_analyzer.analyze_files(
-            files=request.files, mode=request.mode, config=request.config
-        )
-
-        return result
-
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is
-        raise
-    except ValueError as e:
-        logger.error(f"Validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Analysis failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail="Analysis failed due to internal error"
-        )
-
-
-@router.get("/health")
-async def health_check(
-    test_analyzer: TestAnalyzer = Depends(get_analyzer),
-) -> Dict[str, Any]:
-    """
-    Health check endpoint for the API.
-
-    Args:
-        test_analyzer: Injected TestAnalyzer instance
-
-    Returns:
-        Health status information
-    """
-    try:
-        return {
-            "status": "healthy",
-            "analyzer_ready": test_analyzer is not None,
-            "mode": "full",
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        return {"status": "unhealthy", "error": str(e), "analyzer_ready": False}
-
-
-@router.get("/modes")
-async def get_analysis_modes() -> Dict[str, Any]:
-    """
-    Get available analysis modes.
-
-    Returns:
-        Dictionary containing available analysis modes with descriptions
-    """
-    from app.core.constants import AnalysisMode
-
-    return {
-        "modes": [
-            {
-                "id": AnalysisMode.RULES_ONLY.value,
-                "name": "Rules Only",
-                "description": (
-                    "Fast analysis using only deterministic rules "
-                    "(recommended for quick checks)"
-                ),
-            },
-            {
-                "id": AnalysisMode.LLM_ONLY.value,
-                "name": "LLM Only",
-                "description": (
-                    "Deep analysis using only AI (slower but more comprehensive)"
-                ),
-            },
-            {
-                "id": AnalysisMode.HYBRID.value,
-                "name": "Hybrid",
-                "description": (
-                    "Combines fast rule-based analysis with AI for "
-                    "uncertain cases (recommended)"
-                ),
-            },
-        ]
-    }
-
-
 @router.post(
     "/workflows/generate-tests",
     response_model=AsyncJobResponse,
@@ -337,3 +220,108 @@ async def get_task_status(task_id: str) -> TaskStatusResponse:
         error=error,
         created_at=task_data.get("created_at"),
     )
+
+
+@router.post("/quality/analyze", response_model=QualityAnalysisResponse)
+async def analyze_quality(
+    request: QualityAnalysisRequest,
+    quality_service: QualityAnalysisService = Depends(get_quality_service),
+) -> QualityAnalysisResponse:
+    """
+    Analyze multiple test files for quality issues with fix suggestions.
+
+    This endpoint provides batch quality analysis with suggestions for fixes.
+    Uses fast (rules-only), deep (LLM-only), or hybrid analysis modes.
+
+    Args:
+        request: Quality analysis request containing files and mode
+        quality_service: Injected QualityAnalysisService instance
+
+    Returns:
+        Quality analysis response with issues and summary statistics
+
+    Raises:
+        HTTPException: If analysis fails or request is invalid
+    """
+    try:
+        # Validate request
+        if not request.files:
+            raise HTTPException(
+                status_code=400, detail="No files provided for analysis"
+            )
+
+        if len(request.files) > MAX_FILES_PER_REQUEST:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many files (max {MAX_FILES_PER_REQUEST})",
+            )
+
+        # Run quality analysis
+        result = await quality_service.analyze_batch(
+            files=request.files, mode=request.mode
+        )
+
+        return result
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Quality analysis failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Quality analysis failed due to internal error"
+        )
+
+
+@router.post("/analysis/impact", response_model=ImpactAnalysisResponse)
+async def analyze_impact(
+    request: ImpactAnalysisRequest,
+    impact_analyzer: ImpactAnalyzer = Depends(get_impact_analyzer),
+) -> ImpactAnalysisResponse:
+    """
+    Analyze the impact of file changes on test files.
+
+    This endpoint accepts project context (changed files and related tests)
+    and returns which tests may be impacted by the changes with severity assessment.
+
+    Args:
+        request: Impact analysis request containing project context
+        impact_analyzer: Injected ImpactAnalyzer instance
+
+    Returns:
+        Impact analysis response with impacted tests and suggested actions
+
+    Raises:
+        HTTPException: If analysis fails or request is invalid
+    """
+    try:
+        # Validate request
+        if not request.project_context.files_changed:
+            raise HTTPException(status_code=400, detail="files_changed cannot be empty")
+
+        # Extract data from request
+        files_changed = [
+            {"path": entry.path, "change_type": entry.change_type}
+            for entry in request.project_context.files_changed
+        ]
+        related_tests = request.project_context.related_tests
+
+        # Run impact analysis
+        result = impact_analyzer.analyze_impact(files_changed, related_tests)
+
+        return result
+
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except ValueError as e:
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Impact analysis failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500, detail="Impact analysis failed due to internal error"
+        )
