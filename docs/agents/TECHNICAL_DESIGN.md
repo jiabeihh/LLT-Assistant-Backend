@@ -52,7 +52,7 @@ Design and implement a lightweight, modular agent framework using LangChain to i
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     FastAPI Endpoint                         │
-│                    /api/v1/analyze                           │
+│                    /quality/analyze                          │
 └─────────────────────┬───────────────────────────────────────┘
                       │
                       ▼

@@ -86,7 +86,7 @@ class TestQualityAnalysisAPI:
 
         app.dependency_overrides[routes.get_quality_service] = lambda: mock_service
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
 
         # Verify response
         assert response.status_code == 200
@@ -126,7 +126,7 @@ class TestQualityAnalysisAPI:
             "mode": "hybrid",
         }
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
 
         # Should return 400 for validation error
         assert response.status_code == 400
@@ -146,7 +146,7 @@ class TestQualityAnalysisAPI:
             "mode": "hybrid",
         }
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
 
         # Should return 422 for validation error (missing required field)
         assert response.status_code == 422
@@ -165,7 +165,7 @@ class TestQualityAnalysisAPI:
             "mode": "invalid-mode",
         }
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
 
         # Should return 422 for validation error
         assert response.status_code == 422
@@ -219,7 +219,7 @@ class TestQualityAnalysisAPI:
 
         app.dependency_overrides[routes.get_quality_service] = lambda: mock_service
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
 
         assert response.status_code == 200
         response_data = response.json()
@@ -268,7 +268,7 @@ class TestQualityAnalysisAPI:
 
         app.dependency_overrides[routes.get_quality_service] = lambda: mock_service
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
 
         assert response.status_code == 200
         response_data = response.json()
@@ -298,7 +298,7 @@ class TestQualityAnalysisAPI:
 
         app.dependency_overrides[routes.get_quality_service] = lambda: mock_service
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
 
         # Should return 500 for internal error
         assert response.status_code == 500
@@ -333,7 +333,7 @@ class TestQualityAnalysisAPI:
 
         app.dependency_overrides[routes.get_quality_service] = failing_service_factory
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
 
         # Should return 503 for service unavailable
         assert response.status_code == 503
@@ -385,7 +385,7 @@ class TestQualityAnalysisAPI:
 
         app.dependency_overrides[routes.get_quality_service] = lambda: mock_service
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
         # Clean up
         app.dependency_overrides = {}
 
@@ -437,7 +437,7 @@ class TestQualityAnalysisAPI:
 
         request_payload = {"files": too_many_files, "mode": "fast"}
 
-        response = client.post("/api/v1/quality/analyze", json=request_payload)
+        response = client.post("/quality/analyze", json=request_payload)
 
         # Should return 400 for too many files
         assert response.status_code == 400

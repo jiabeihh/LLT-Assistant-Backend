@@ -51,7 +51,7 @@ def test_analyze_impact_success():
     # Patch where the dependency is used, not where it's defined
     with patch("app.api.v1.routes.ImpactAnalyzer", return_value=mock_analyzer):
         with patch("app.api.v1.routes.get_impact_analyzer", return_value=mock_analyzer):
-            response = client.post("/api/v1/analysis/impact", json=request_payload)
+            response = client.post("/analysis/impact", json=request_payload)
 
     # Verify response
     assert response.status_code == 200
@@ -88,7 +88,7 @@ def test_analyze_impact_no_files_changed():
         }
     }
 
-    response = client.post("/api/v1/analysis/impact", json=request_payload)
+    response = client.post("/analysis/impact", json=request_payload)
 
     # Should return 400 for validation error
     assert response.status_code == 400
@@ -111,7 +111,7 @@ def test_analyze_impact_missing_files_changed():
         }
     }
 
-    response = client.post("/api/v1/analysis/impact", json=request_payload)
+    response = client.post("/analysis/impact", json=request_payload)
 
     # Should return 422 for validation error (missing required field)
     assert response.status_code == 422
@@ -146,7 +146,7 @@ def test_analyze_impact_single_test_file():
 
     with patch("app.api.v1.routes.ImpactAnalyzer", return_value=mock_analyzer):
         with patch("app.api.v1.routes.get_impact_analyzer", return_value=mock_analyzer):
-            response = client.post("/api/v1/analysis/impact", json=request_payload)
+            response = client.post("/analysis/impact", json=request_payload)
 
     assert response.status_code == 200
     response_data = response.json()
@@ -185,7 +185,7 @@ def test_analyze_impact_no_matching_tests():
 
     with patch("app.api.v1.routes.ImpactAnalyzer", return_value=mock_analyzer):
         with patch("app.api.v1.routes.get_impact_analyzer", return_value=mock_analyzer):
-            response = client.post("/api/v1/analysis/impact", json=request_payload)
+            response = client.post("/analysis/impact", json=request_payload)
 
     assert response.status_code == 200
     response_data = response.json()
@@ -216,7 +216,7 @@ def test_analyze_impact_no_related_tests():
 
     with patch("app.api.v1.routes.ImpactAnalyzer", return_value=mock_analyzer):
         with patch("app.api.v1.routes.get_impact_analyzer", return_value=mock_analyzer):
-            response = client.post("/api/v1/analysis/impact", json=request_payload)
+            response = client.post("/analysis/impact", json=request_payload)
 
     assert response.status_code == 200
     response_data = response.json()
@@ -242,7 +242,7 @@ def test_analyze_impact_analyzer_exception():
 
     with patch("app.api.v1.routes.ImpactAnalyzer", return_value=mock_analyzer):
         with patch("app.api.v1.routes.get_impact_analyzer", return_value=mock_analyzer):
-            response = client.post("/api/v1/analysis/impact", json=request_payload)
+            response = client.post("/analysis/impact", json=request_payload)
 
     # Should return 500 for internal error
     assert response.status_code == 500
@@ -266,7 +266,7 @@ def test_analyze_impact_analyzer_initialization_failure():
     with patch(
         "app.api.v1.routes.RuleEngine", side_effect=Exception("Initialization failed")
     ):
-        response = client.post("/api/v1/analysis/impact", json=request_payload)
+        response = client.post("/analysis/impact", json=request_payload)
 
     # Should return 503 for service unavailable
     assert response.status_code == 503
@@ -302,7 +302,7 @@ def test_analyze_impact_response_schema_compliance():
 
     with patch("app.api.v1.routes.ImpactAnalyzer", return_value=mock_analyzer):
         with patch("app.api.v1.routes.get_impact_analyzer", return_value=mock_analyzer):
-            response = client.post("/api/v1/analysis/impact", json=request_payload)
+            response = client.post("/analysis/impact", json=request_payload)
 
     assert response.status_code == 200
     response_data = response.json()

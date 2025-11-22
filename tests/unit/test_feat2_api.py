@@ -1,8 +1,8 @@
 """Unit tests for Feature 2 (coverage optimization) API contracts.
 
 These tests focus on the request/response shapes for:
-- POST /api/v1/optimization/coverage
-- GET  /api/v1/tasks/{task_id}
+- POST /optimization/coverage
+- GET  /tasks/{task_id}
 
 The goal is to keep them aligned with docs/api/openapi.yaml and mirror Feature 1 tests.
 """
@@ -65,7 +65,7 @@ class TestCoverageOptimizationWorkflow:
             "framework": "pytest",
         }
 
-        response = client.post("/api/v1/optimization/coverage", json=payload)
+        response = client.post("/optimization/coverage", json=payload)
 
         assert response.status_code == 202
         data = response.json()
@@ -96,13 +96,13 @@ class TestCoverageOptimizationWorkflow:
             "uncovered_ranges": [{"start_line": 1, "end_line": 2, "type": "line"}]
         }
 
-        response = client.post("/api/v1/optimization/coverage", json=payload)
+        response = client.post("/optimization/coverage", json=payload)
         assert response.status_code in {400, 422}
 
         # Missing uncovered_ranges
         payload = {"source_code": "def add(a, b): return a + b"}
 
-        response = client.post("/api/v1/optimization/coverage", json=payload)
+        response = client.post("/optimization/coverage", json=payload)
         assert response.status_code in {400, 422}
 
     def test_coverage_optimization_invalid_uncovered_range_format_is_rejected(
@@ -116,7 +116,7 @@ class TestCoverageOptimizationWorkflow:
             "uncovered_ranges": ["invalid", "format"],  # Should be objects, not strings
         }
 
-        response = client.post("/api/v1/optimization/coverage", json=payload)
+        response = client.post("/optimization/coverage", json=payload)
         assert response.status_code in {400, 422}
 
 
@@ -150,7 +150,7 @@ class TestCoverageOptimizationTaskStatus:
 
         monkeypatch.setattr(routes_module, "get_task", fake_get_task)
 
-        response = client.get("/api/v1/tasks/123e4567-e89b-12d3-a456-426614174000")
+        response = client.get("/tasks/123e4567-e89b-12d3-a456-426614174000")
 
         assert response.status_code == 200
         data = response.json()
@@ -199,7 +199,7 @@ class TestCoverageOptimizationTaskStatus:
 
         monkeypatch.setattr(routes_module, "get_task", fake_get_task)
 
-        response = client.get("/api/v1/tasks/00000000-0000-0000-0000-000000000000")
+        response = client.get("/tasks/00000000-0000-0000-0000-000000000000")
 
         assert response.status_code == 404
         # According to OpenAPI spec, 404 response should have empty body

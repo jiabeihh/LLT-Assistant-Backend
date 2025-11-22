@@ -46,7 +46,7 @@ class TestAPIFuzzing:
         }
 
         try:
-            response = fuzzing_client.post("/api/v1/analyze", json=payload)
+            response = fuzzing_client.post("/quality/analyze", json=payload)
 
             # Should either succeed or return validation error
             assert response.status_code in [200, 400, 422, 500]
@@ -78,7 +78,7 @@ class TestAPIFuzzing:
             "mode": mode,
         }
 
-        response = fuzzing_client.post("/api/v1/analyze", json=payload)
+        response = fuzzing_client.post("/quality/analyze", json=payload)
 
         # Valid modes should succeed, invalid should error
         if mode in ["rules-only", "llm-only", "hybrid"]:
@@ -98,7 +98,7 @@ class TestAPIFuzzing:
         }
 
         try:
-            response = fuzzing_client.post("/api/v1/analyze", json=payload)
+            response = fuzzing_client.post("/quality/analyze", json=payload)
 
             # Should handle any content gracefully
             assert response.status_code in [200, 400, 422, 500]
@@ -124,7 +124,7 @@ class TestAPIFuzzing:
 
         payload = {"files": files, "mode": "rules-only"}
 
-        response = fuzzing_client.post("/api/v1/analyze", json=payload)
+        response = fuzzing_client.post("/quality/analyze", json=payload)
 
         if num_files == 0:
             # Empty files should error
@@ -296,7 +296,7 @@ class TestInputValidationFuzzing:
     def test_analyze_with_random_json_payloads(self, fuzzing_client, data):
         """Test analyze endpoint with random JSON payloads."""
         try:
-            response = fuzzing_client.post("/api/v1/analyze", json=data)
+            response = fuzzing_client.post("/quality/analyze", json=data)
 
             # Should return some response (not crash)
             assert response.status_code in [200, 400, 422, 500]
@@ -323,7 +323,7 @@ class TestInputValidationFuzzing:
         }
 
         try:
-            response = fuzzing_client.post("/api/v1/analyze", json=payload)
+            response = fuzzing_client.post("/quality/analyze", json=payload)
 
             # Should handle various git_diff values
             assert response.status_code in [200, 400, 422]
@@ -342,7 +342,7 @@ class TestEdgeCases:
             "mode": "rules-only",
         }
 
-        response = fuzzing_client.post("/api/v1/analyze", json=payload)
+        response = fuzzing_client.post("/quality/analyze", json=payload)
 
         # Should handle empty content gracefully
         assert response.status_code in [200, 400, 422]
@@ -360,7 +360,7 @@ class TestEdgeCases:
             "mode": "rules-only",
         }
 
-        response = fuzzing_client.post("/api/v1/analyze", json=payload)
+        response = fuzzing_client.post("/quality/analyze", json=payload)
 
         assert response.status_code in [200, 400, 422]
 
@@ -381,7 +381,7 @@ def test_unicode():
             "mode": "rules-only",
         }
 
-        response = fuzzing_client.post("/api/v1/analyze", json=payload)
+        response = fuzzing_client.post("/quality/analyze", json=payload)
 
         assert response.status_code == 200
 
@@ -399,7 +399,7 @@ def test_unicode():
             "mode": "rules-only",
         }
 
-        response = fuzzing_client.post("/api/v1/analyze", json=payload)
+        response = fuzzing_client.post("/quality/analyze", json=payload)
 
         # Should handle long lines
         assert response.status_code in [200, 400, 422, 500]
@@ -416,6 +416,6 @@ def test_unicode():
             "mode": "rules-only",
         }
 
-        response = fuzzing_client.post("/api/v1/analyze", json=payload)
+        response = fuzzing_client.post("/quality/analyze", json=payload)
 
         assert response.status_code in [200, 400, 422]

@@ -19,9 +19,9 @@ info:
     name: LLT Assistant Technical Team
 
 servers:
-  - url: http://localhost:8000/api/v1
+  - url: http://localhost:8000
     description: Local development server
-  - url: https://api.llt-assistant.com/v1
+  - url: https://api.llt-assistant.com
     description: Production server
 
 tags:

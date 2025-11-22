@@ -1,8 +1,8 @@
 """Unit tests for Feature 1 (test generation) API contracts.
 
 These tests focus on the request/response shapes for:
-- POST /api/v1/workflows/generate-tests
-- GET  /api/v1/tasks/{task_id}
+- POST /workflows/generate-tests
+- GET  /tasks/{task_id}
 
 The goal is to keep them aligned with docs/api/openapi.yaml.
 """
@@ -65,7 +65,7 @@ class TestGenerateTestsWorkflow:
             },
         }
 
-        response = client.post("/api/v1/workflows/generate-tests", json=payload)
+        response = client.post("/workflows/generate-tests", json=payload)
 
         assert response.status_code == 202
         data = response.json()
@@ -96,7 +96,7 @@ class TestGenerateTestsWorkflow:
             "user_description": "Should be rejected",
         }
 
-        response = client.post("/api/v1/workflows/generate-tests", json=payload)
+        response = client.post("/workflows/generate-tests", json=payload)
 
         # Depending on implementation this may be 400 (BadRequest) or 422 (validation error)
         assert response.status_code in {400, 422}
@@ -127,7 +127,7 @@ class TestTaskStatusEndpoint:
         monkeypatch.setattr(routes_module, "get_task", fake_get_task)
 
         response = client.get(
-            "/api/v1/tasks/123e4567-e89b-12d3-a456-426614174000",
+            "/tasks/123e4567-e89b-12d3-a456-426614174000",
         )
 
         assert response.status_code == 200
@@ -166,7 +166,7 @@ class TestTaskStatusEndpoint:
         monkeypatch.setattr(routes_module, "get_task", fake_get_task)
 
         response = client.get(
-            "/api/v1/tasks/00000000-0000-0000-0000-000000000000",
+            "/tasks/00000000-0000-0000-0000-000000000000",
         )
 
         assert response.status_code == 404

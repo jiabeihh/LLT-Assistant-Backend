@@ -126,9 +126,10 @@ async def submit_generate_tests(
         task_payload = request.model_dump()
 
         logger.info(
-            "Received test generation request: %d files, mode=%s",
-            len(request.files),
-            request.mode,
+            "Received test generation request: source_code_length=%d, has_description=%s, has_existing_tests=%s",
+            len(request.source_code),
+            request.user_description is not None,
+            request.existing_test_code is not None,
         )
         logger.debug("Request payload: %s", task_payload)
 

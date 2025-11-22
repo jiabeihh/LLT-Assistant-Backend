@@ -153,7 +153,7 @@ The backend is feature-complete and ready for production use. The system can:
 
 ### Analyze Test Files
 
-**Endpoint:** `POST /api/v1/analyze`
+**Endpoint:** `POST /quality/analyze`
 
 **Request:**
 ```json
@@ -205,7 +205,7 @@ The backend is feature-complete and ready for production use. The system can:
 
 ### Get Analysis Modes
 
-**Endpoint:** `GET /api/v1/modes`
+**Endpoint:** `GET /modes`
 
 Returns available analysis modes with descriptions.
 

@@ -52,7 +52,7 @@ def test_addition():
             "mode": "fast",  # Use fast mode (rules-only)
         }
 
-        response = integration_client.post("/api/v1/quality/analyze", json=payload)
+        response = integration_client.post("/quality/analyze", json=payload)
 
         assert response.status_code == 200
         data = response.json()
@@ -87,7 +87,7 @@ def test_redundant():
             "mode": "fast",
         }
 
-        response = integration_client.post("/api/v1/quality/analyze", json=payload)
+        response = integration_client.post("/quality/analyze", json=payload)
 
         assert response.status_code == 200
         data = response.json()
@@ -121,7 +121,7 @@ def test_redundant():
             "mode": "fast",
         }
 
-        response = integration_client.post("/api/v1/quality/analyze", json=payload)
+        response = integration_client.post("/quality/analyze", json=payload)
 
         assert response.status_code == 200
         data = response.json()
@@ -141,7 +141,7 @@ class TestImpactAnalysisEndpoint:
             }
         }
 
-        response = integration_client.post("/api/v1/analysis/impact", json=payload)
+        response = integration_client.post("/analysis/impact", json=payload)
 
         assert response.status_code == 200
         data = response.json()
@@ -163,7 +163,7 @@ class TestImpactAnalysisEndpoint:
             }
         }
 
-        response = integration_client.post("/api/v1/analysis/impact", json=payload)
+        response = integration_client.post("/analysis/impact", json=payload)
 
         assert response.status_code == 400
         data = response.json()
@@ -185,9 +185,7 @@ def add(a, b):
             "context": None,
         }
 
-        response = integration_client.post(
-            "/api/v1/workflows/generate-tests", json=payload
-        )
+        response = integration_client.post("/workflows/generate-tests", json=payload)
 
         assert response.status_code == 202  # Accepted
         data = response.json()
@@ -213,9 +211,7 @@ def test_add():
             "framework": "pytest",
         }
 
-        response = integration_client.post(
-            "/api/v1/optimization/coverage", json=payload
-        )
+        response = integration_client.post("/optimization/coverage", json=payload)
 
         assert response.status_code == 202  # Accepted
         data = response.json()
@@ -232,12 +228,12 @@ def add(a, b):
             "user_description": "Test adding two numbers",
         }
         create_response = integration_client.post(
-            "/api/v1/workflows/generate-tests", json=payload
+            "/workflows/generate-tests", json=payload
         )
         task_id = create_response.json()["task_id"]
 
         # Then check its status
-        response = integration_client.get(f"/api/v1/tasks/{task_id}")
+        response = integration_client.get(f"/tasks/{task_id}")
 
         assert response.status_code == 200
         data = response.json()
@@ -250,20 +246,20 @@ class TestErrorHandling:
 
     def test_404_on_invalid_endpoint(self, integration_client):
         """Test that invalid endpoints return 404."""
-        response = integration_client.get("/api/v1/nonexistent")
+        response = integration_client.get("/nonexistent")
 
         assert response.status_code == 404
 
     def test_405_on_wrong_method(self, integration_client):
         """Test that wrong HTTP method returns 405."""
         # Test POST endpoint with GET
-        response = integration_client.get("/api/v1/quality/analyze")
+        response = integration_client.get("/quality/analyze")
         assert response.status_code == 405
 
     def test_malformed_json_returns_error(self, integration_client):
         """Test that malformed JSON returns error."""
         response = integration_client.post(
-            "/api/v1/quality/analyze",
+            "/quality/analyze",
             data="this is not json",
             headers={"Content-Type": "application/json"},
         )
@@ -292,7 +288,7 @@ class TestPerformance:
             "mode": "fast",
         }
 
-        response = integration_client.post("/api/v1/quality/analyze", json=payload)
+        response = integration_client.post("/quality/analyze", json=payload)
 
         assert response.status_code == 200
         data = response.json()
@@ -309,7 +305,7 @@ class TestPerformance:
 
         payload = {"files": files, "mode": "fast"}
 
-        response = integration_client.post("/api/v1/quality/analyze", json=payload)
+        response = integration_client.post("/quality/analyze", json=payload)
 
         assert response.status_code == 200
         data = response.json()

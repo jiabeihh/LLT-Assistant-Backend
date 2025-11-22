@@ -83,4 +83,4 @@ async def root() -> dict[str, str]:
 
 
 # Include API routes
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router)
