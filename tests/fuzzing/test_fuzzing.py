@@ -42,7 +42,7 @@ class TestAPIFuzzing:
         """Test analyze endpoint with randomly generated file paths."""
         payload = {
             "files": [{"path": path, "content": content, "git_diff": None}],
-            "mode": "rules-only",
+            "mode": "fast",
         }
 
         try:
@@ -81,7 +81,7 @@ class TestAPIFuzzing:
         response = fuzzing_client.post("/quality/analyze", json=payload)
 
         # Valid modes should succeed, invalid should error
-        if mode in ["rules-only", "llm-only", "hybrid"]:
+        if mode in ["fast", "deep", "hybrid"]:
             assert response.status_code == 200
         else:
             assert response.status_code in [400, 422]
@@ -94,7 +94,7 @@ class TestAPIFuzzing:
         """Test analyze endpoint with random file content."""
         payload = {
             "files": [{"path": "test_random.py", "content": content, "git_diff": None}],
-            "mode": "rules-only",
+            "mode": "fast",
         }
 
         try:
@@ -122,7 +122,7 @@ class TestAPIFuzzing:
             for i in range(num_files)
         ]
 
-        payload = {"files": files, "mode": "rules-only"}
+        payload = {"files": files, "mode": "fast"}
 
         response = fuzzing_client.post("/quality/analyze", json=payload)
 
@@ -319,7 +319,7 @@ class TestInputValidationFuzzing:
                     "git_diff": git_diff,
                 }
             ],
-            "mode": "rules-only",
+            "mode": "fast",
         }
 
         try:
@@ -339,7 +339,7 @@ class TestEdgeCases:
         """Test analyzing file with empty string content."""
         payload = {
             "files": [{"path": "test_empty.py", "content": "", "git_diff": None}],
-            "mode": "rules-only",
+            "mode": "fast",
         }
 
         response = fuzzing_client.post("/quality/analyze", json=payload)
@@ -357,7 +357,7 @@ class TestEdgeCases:
                     "git_diff": None,
                 }
             ],
-            "mode": "rules-only",
+            "mode": "fast",
         }
 
         response = fuzzing_client.post("/quality/analyze", json=payload)
@@ -378,7 +378,7 @@ def test_unicode():
                     "git_diff": None,
                 }
             ],
-            "mode": "rules-only",
+            "mode": "fast",
         }
 
         response = fuzzing_client.post("/quality/analyze", json=payload)
@@ -396,7 +396,7 @@ def test_unicode():
                     "git_diff": None,
                 }
             ],
-            "mode": "rules-only",
+            "mode": "fast",
         }
 
         response = fuzzing_client.post("/quality/analyze", json=payload)
@@ -413,7 +413,7 @@ def test_unicode():
 
         payload = {
             "files": [{"path": "test_nested.py", "content": code, "git_diff": None}],
-            "mode": "rules-only",
+            "mode": "fast",
         }
 
         response = fuzzing_client.post("/quality/analyze", json=payload)

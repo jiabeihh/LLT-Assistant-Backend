@@ -101,6 +101,42 @@ class NonCriticalFailureAgent(BaseAgent):
         )
 
 
+class MetadataCriticalFailureAgent(BaseAgent):
+    """Agent that fails with a critical error via metadata flag."""
+
+    async def execute(self, context: AgentContext) -> AgentResult:
+        """Fail critically."""
+        return AgentResult(
+            success=False,
+            data=None,
+            errors=["Critical failure occurred"],
+            warnings=[],
+            metadata={
+                "agent": self.name,
+                "critical": True,  # Only this flag
+            },
+            execution_time_ms=0,
+        )
+
+
+class NonCriticalStageFailureAgent(BaseAgent):
+    """Agent that fails with a non-critical stage."""
+
+    async def execute(self, context: AgentContext) -> AgentResult:
+        """Fail with a non-critical stage."""
+        return AgentResult(
+            success=False,
+            data=None,
+            errors=["Non-critical stage failure"],
+            warnings=[],
+            metadata={
+                "agent": self.name,
+                "stage": "processing",  # Not in {"input_validation", "parsing"}
+            },
+            execution_time_ms=0,
+        )
+
+
 @pytest.mark.asyncio
 class TestAgentOrchestrator:
     """Test cases for AgentOrchestrator."""
@@ -306,6 +342,14 @@ class TestAgentOrchestrator:
         assert "test_orch" in repr_str
         assert "sequential_agents=1" in repr_str
         assert "parallel_agents=2" in repr_str
+
+
+def test_orchestrator_creation():
+    """Test basic orchestrator creation."""
+    orchestrator = AgentOrchestrator(name="creation_test")
+    assert orchestrator.name == "creation_test"
+    assert orchestrator.sequential_agents == []
+    assert orchestrator.parallel_agent_groups == []
 
 
 @pytest.mark.asyncio
