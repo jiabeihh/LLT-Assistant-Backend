@@ -1,14 +1,15 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.agents.llm.client import (
-    create_llm_client,
-    get_llm_client,
     chat_completion,
     clear_client_cache,
+    create_llm_client,
+    get_llm_client,
 )
 from app.agents.llm.settings import LLMSettings
-from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 
 # Mark all tests in this module as asynchronous
 pytestmark = pytest.mark.asyncio
