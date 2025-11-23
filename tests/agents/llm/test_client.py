@@ -107,7 +107,7 @@ async def test_chat_completion_success():
 
         assert response == "4"
         mock_client.ainvoke.assert_awaited_once()
-        
+
         called_messages = mock_client.ainvoke.call_args[0][0]
         assert isinstance(called_messages[0], SystemMessage)
         assert called_messages[0].content == "You are a helpful assistant."
