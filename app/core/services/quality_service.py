@@ -20,6 +20,7 @@ from app.api.v1.schemas import (
 from app.core.analysis.llm_analyzer import LLMAnalyzer
 from app.core.analyzer import TestAnalyzer
 from app.core.llm.llm_client import create_llm_client
+from app.utils.pylint_runner import PylintRunner, is_pylint_available
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,18 @@ class QualityAnalysisService:
             self.test_analyzer = TestAnalyzer(rule_engine, llm_analyzer)
         else:
             self.test_analyzer = test_analyzer
+
+        # Initialize pylint runner if available
+        if is_pylint_available():
+            try:
+                self.pylint_runner = PylintRunner()
+                logger.info("Pylint integration enabled for quality analysis")
+            except Exception as e:
+                logger.warning("Failed to initialize pylint runner: %s", e)
+                self.pylint_runner = None
+        else:
+            logger.info("Pylint not available, using rule-based analysis only")
+            self.pylint_runner = None
 
     async def analyze_batch(
         self, files: List[FileInput], mode: str = "hybrid"
@@ -84,6 +97,13 @@ class QualityAnalysisService:
             analyzer_mode = self._convert_mode(mode)
             logger.debug("Converted mode: %s -> %s", mode, analyzer_mode)
 
+            # Run pylint analysis if available and in fast mode
+            pylint_issues = []
+            if self.pylint_runner and mode == "fast":
+                logger.debug("Running pylint analysis on %d files", len(files))
+                pylint_issues = self._run_pylint_analysis(files)
+                logger.debug("Pylint found %d additional issues", len(pylint_issues))
+
             # Perform analysis using existing TestAnalyzer
             logger.debug("Calling TestAnalyzer.analyze_files")
             analysis_result = await self.test_analyzer.analyze_files(
@@ -95,7 +115,10 @@ class QualityAnalysisService:
 
             # Convert results to Quality Analysis format
             logger.debug("Converting issues to quality analysis format")
-            quality_issues = self._convert_issues(analysis_result.issues)
+            test_analyzer_issues = self._convert_issues(analysis_result.issues)
+
+            # Merge pylint and test analyzer issues
+            quality_issues = self._merge_issues(test_analyzer_issues, pylint_issues)
 
             # Calculate summary statistics
             summary = self._calculate_summary(files, quality_issues)
@@ -231,6 +254,88 @@ class QualityAnalysisService:
             total_issues=total_issues,
             critical_issues=critical_issues,
         )
+
+    def _run_pylint_analysis(self, files: List[FileInput]) -> List[QualityIssue]:
+        """
+        Run pylint analysis on the provided files.
+
+        Args:
+            files: List of files to analyze
+
+        Returns:
+            List of QualityIssue objects from pylint
+        """
+        if not self.pylint_runner:
+            return []
+
+        issues = []
+        for file_input in files:
+            try:
+                # Only analyze Python files
+                if not file_input.path.endswith('.py'):
+                    continue
+
+                pylint_issues = self.pylint_runner.analyze_code(
+                    file_input.content, file_input.path
+                )
+
+                for pylint_issue in pylint_issues:
+                    # Convert pylint issue to QualityIssue
+                    suggestion_text = self.pylint_runner.get_fix_suggestion(pylint_issue)
+
+                    quality_issue = QualityIssue(
+                        file_path=file_input.path,
+                        line=pylint_issue.line,
+                        column=pylint_issue.column,
+                        severity=pylint_issue.severity,
+                        code=pylint_issue.symbol,
+                        message=pylint_issue.message,
+                        detected_by="rule",  # Pylint is rule-based
+                        suggestion=FixSuggestion(
+                            type="replace",
+                            new_text="",  # Pylint suggestions are descriptive
+                            description=suggestion_text or f"Fix: {pylint_issue.message}",
+                        ) if suggestion_text else None,
+                    )
+                    issues.append(quality_issue)
+
+            except Exception as e:
+                logger.warning("Pylint analysis failed for file %s: %s", file_input.path, e)
+
+        return issues
+
+    def _merge_issues(
+        self, test_analyzer_issues: List[QualityIssue], pylint_issues: List[QualityIssue]
+    ) -> List[QualityIssue]:
+        """
+        Merge issues from test analyzer and pylint, removing duplicates.
+
+        Args:
+            test_analyzer_issues: Issues from the test analyzer
+            pylint_issues: Issues from pylint
+
+        Returns:
+            Merged list of unique issues
+        """
+        all_issues = test_analyzer_issues + pylint_issues
+
+        # Remove duplicates based on file_path, line, and message
+        seen_issues = set()
+        unique_issues = []
+
+        for issue in all_issues:
+            # Create a key for deduplication
+            key = (issue.file_path, issue.line, issue.code, issue.message[:100])  # First 100 chars
+
+            if key not in seen_issues:
+                seen_issues.add(key)
+                unique_issues.append(issue)
+            else:
+                logger.debug(
+                    "Deduplicating issue: %s:%d - %s", issue.file_path, issue.line, issue.code
+                )
+
+        return unique_issues
 
     async def close(self) -> None:
         """Close resources used by the service."""

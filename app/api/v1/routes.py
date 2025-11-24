@@ -366,10 +366,13 @@ async def analyze_impact(
             {"path": entry.path, "change_type": entry.change_type}
             for entry in request.project_context.files_changed
         ]
-        related_tests = request.project_context.related_tests
+        related_tests = [
+            {"path": test_path, "content": ""}  # API schema only provides path, not content
+            for test_path in request.project_context.related_tests
+        ]
 
-        # Run impact analysis
-        result = impact_analyzer.analyze_impact(files_changed, related_tests)
+        # Run impact analysis (make it async)
+        result = await impact_analyzer.analyze_impact(files_changed, related_tests)
 
         logger.info(
             "Impact analysis completed: %d impacted tests found",
