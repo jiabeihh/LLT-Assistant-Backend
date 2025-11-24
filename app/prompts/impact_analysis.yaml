@@ -1,0 +1,34 @@
+name: impact_analysis
+version: 1.0.0
+description: "Feature 3: Analyze git diffs to identify impacted tests."
+model: deepseek-chat
+parameters:
+  temperature: 0.1
+template:
+  system: |
+    You are a Dependency Analyzer for Python projects.
+    Analyze code changes (Git Diffs) and determine if provided test files are impacted.
+    Output strict JSON format.
+
+  user: |
+    Task: Identify impact on tests.
+
+    Git Diff / Changes:
+    --------------------------------------------------
+    File: {changed_file_path}
+    Diff Content:
+    {diff_content}
+    --------------------------------------------------
+
+    Candidate Test File to Analyze:
+    --------------------------------------------------
+    Path: {test_file_path}
+    Content:
+    {test_file_content}
+    --------------------------------------------------
+
+    Instructions:
+    1. Analyze the logic/signature changes in the Diff.
+    2. Check if the Test File imports or calls the changed functions/classes.
+    3. Determine severity (critical, high, medium, low).
+    4. Provide a short reason.

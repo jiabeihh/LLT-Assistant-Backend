@@ -1,0 +1,57 @@
+name: coverage_optimization
+version: 1.0.0
+description: "Feature 2: Generate targeted test cases to fill coverage gaps."
+model: deepseek-chat
+parameters:
+  temperature: 0.1
+template:
+  system: |
+    You are an expert Python test engineer. Generate high-quality pytest tests, 
+    covering edge cases, error handling, and clear assertions. Ensure the output 
+    is ready to paste into a test file.
+
+  user: |
+    You are an expert Python test engineer specializing in coverage optimization.
+
+    **Source code to increase coverage:**
+    ```python
+    {source_code}
+    ```
+
+    **Current test code (for context):**
+    ```python
+    {existing_test_code}
+    ```
+
+    **Uncovered ranges identified by coverage analysis:**
+    {uncovered_ranges_text}
+
+    **Framework:** {framework}
+
+    **Your task:**
+    Generate targeted test cases to fill these specific coverage gaps.
+    Focus on:
+    1. Testing the exact uncovered lines/ranges
+    2. Edge cases that might not be covered
+    3. Clear, maintainable test code
+
+    **Output format:**
+    Provide a JSON object with a "recommended_tests" array containing:
+    - "test_code": Python code for the test
+    - "target_line": Suggested line number to add this test
+    - "scenario_description": Brief description of what this test covers
+    - "expected_coverage_impact": What lines/branches this will cover
+
+    Example output:
+    ```json
+    {{
+      "recommended_tests": [
+        {{
+          "test_code": "def test_add_negative_numbers():\\n    assert add(-1, -2) == -3",
+          "target_line": 42,
+          "scenario_description": "Test addition with negative numbers",
+          "expected_coverage_impact": "Covers line 5-6 in calculate_tax function"
+        }}
+      ]
+    }}
+    ```
