@@ -1,113 +1,139 @@
-#! python
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-import argparse
-import json
-from os import listdir
-from os.path import isfile, join, exists, isdir, abspath
+# Note: To use the 'upload' functionality of this file, you must:
+#   $ pip install twine
 
-import numpy as np
-import tensorflow as tf
-from tensorflow import keras
-import tensorflow_hub as hub
+import io
+import os
+import sys
+from shutil import rmtree
+
+from setuptools import find_packages, setup, Command
+
+# Package meta-data.
+NAME = 'nsfw_detector'
+DESCRIPTION = 'NSFW Image Detection with Deep Learning'
+URL = 'https://github.com/GantMan/nsfw_model'
+EMAIL = 'gantman@gmail.com'
+AUTHOR = 'Gant Laborde'
+REQUIRES_PYTHON = '>=3.5.0'
+VERSION = '1.1.0'
+
+# What packages are optional?
+EXTRAS = {
+    # 'fancy feature': ['django'],
+}
+
+# The rest you shouldn't have to touch too much :)
+# ------------------------------------------------
+# Except, perhaps the License and Trove Classifiers!
+# If you do change the License, remember to change the Trove Classifier for that!
+
+here = os.path.abspath(os.path.dirname(__file__))
+
+# Import the requirements.
+REQUIRED = []
+try:
+    with io.open(os.path.join(here, 'requirements.txt'), encoding='utf-8') as f:
+        for line_req in f:
+            if line_req[0] != '#':
+                REQUIRED.append(line_req.strip())
+except FileNotFoundError:
+    REQUIRED = []
+
+# Import the README and use it as the long-description.
+# Note: this will only work if 'README.md' is present in your MANIFEST.in file!
+try:
+    with io.open(os.path.join(here, 'README.md'), encoding='utf-8') as f:
+        long_description = '\n' + f.read()
+except FileNotFoundError:
+    long_description = DESCRIPTION
+
+# Load the package's __version__.py module as a dictionary.
+about = {}
+if not VERSION:
+    with open(os.path.join(here, NAME, '__version__.py')) as f:
+        exec(f.read(), about)
+else:
+    about['__version__'] = VERSION
 
 
-IMAGE_DIM = 224   # required/default image dimensionality
+class UploadCommand(Command):
+    """Support setup.py upload."""
 
-def load_images(image_paths, image_size, verbose=True):
-    '''
-    Function for loading images into numpy arrays for passing to model.predict
-    inputs:
-        image_paths: list of image paths to load
-        image_size: size into which images should be resized
-        verbose: show all of the image path and sizes loaded
-    
-    outputs:
-        loaded_images: loaded images on which keras model can run predictions
-        loaded_image_indexes: paths of images which the function is able to process
-    
-    '''
-    loaded_images = []
-    loaded_image_paths = []
+    description = 'Build and publish the package.'
+    user_options = []
 
-    if isdir(image_paths):
-        parent = abspath(image_paths)
-        image_paths = [join(parent, f) for f in listdir(image_paths) if isfile(join(parent, f))]
-    elif isfile(image_paths):
-        image_paths = [image_paths]
+    @staticmethod
+    def status(s):
+        """Prints things in bold."""
+        print('\033[1m{0}\033[0m'.format(s))
 
-    for img_path in image_paths:
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
         try:
-            if verbose:
-                print(img_path, "size:", image_size)
-            image = keras.preprocessing.image.load_img(img_path, target_size=image_size)
-            image = keras.preprocessing.image.img_to_array(image)
-            image /= 255
-            loaded_images.append(image)
-            loaded_image_paths.append(img_path)
-        except Exception as ex:
-            print("Image Load Failure: ", img_path, ex)
-    
-    return np.asarray(loaded_images), loaded_image_paths
+            self.status('Removing previous builds…')
+            rmtree(os.path.join(here, 'dist'))
+        except OSError:
+            pass
 
-def load_model(model_path):
-    if model_path is None or not exists(model_path):
-    	raise ValueError("saved_model_path must be the valid directory of a saved model to load.")
-    
-    model = tf.keras.models.load_model(model_path, custom_objects={'KerasLayer': hub.KerasLayer},compile=False)
-    return model
+        self.status('Building Source and Wheel (universal) distribution…')
+        os.system('{0} setup.py sdist bdist_wheel --universal'.format(sys.executable))
+
+        self.status('Uploading the package to PyPI via Twine…')
+        os.system('twine upload dist/*')
+
+        self.status('Pushing git tags…')
+        os.system('git tag v{0}'.format(about['__version__']))
+        os.system('git push --tags')
+
+        sys.exit()
 
 
-def classify(model, input_paths, image_dim=IMAGE_DIM):
-    """ Classify given a model, input paths (could be single string), and image dimensionality...."""
-    images, image_paths = load_images(input_paths, (image_dim, image_dim))
-    probs = classify_nd(model, images)
-    return dict(zip(image_paths, probs))
+# Where the magic happens:
+setup(
+    name=NAME,
+    version=about['__version__'],
+    description=DESCRIPTION,
+    long_description=long_description,
+    long_description_content_type='text/markdown',
+    author=AUTHOR,
+    author_email=EMAIL,
+    python_requires=REQUIRES_PYTHON,
+    url=URL,
+    packages=find_packages(exclude=('tests',)),
+    # If your package is a single module, use this instead of 'packages':
+    # py_modules=['mypackage'],
 
-
-def classify_nd(model, nd_images):
-    """ Classify given a model, image array (numpy)...."""
-
-    model_preds = model.predict(nd_images)
-    # preds = np.argsort(model_preds, axis = 1).tolist()
-    
-    categories = ['drawings', 'hentai', 'neutral', 'porn', 'sexy']
-
-    probs = []
-    for i, single_preds in enumerate(model_preds):
-        single_probs = {}
-        for j, pred in enumerate(single_preds):
-            single_probs[categories[j]] = float(pred)
-        probs.append(single_probs)
-    return probs
-
-
-def main(args=None):
-    parser = argparse.ArgumentParser(
-        description="""A script to perform NFSW classification of images""",
-        epilog="""
-        Launch with default model and a test image
-            python nsfw_detector/predict.py --saved_model_path mobilenet_v2_140_224 --image_source test.jpg
-    """, formatter_class=argparse.RawTextHelpFormatter)
-    
-    submain = parser.add_argument_group('main execution and evaluation functionality')
-    submain.add_argument('--image_source', dest='image_source', type=str, required=True, 
-                            help='A directory of images or a single image to classify')
-    submain.add_argument('--saved_model_path', dest='saved_model_path', type=str, required=True, 
-                            help='The model to load')
-    submain.add_argument('--image_dim', dest='image_dim', type=int, default=IMAGE_DIM,
-                            help="The square dimension of the model's input shape")
-    if args is not None:
-        config = vars(parser.parse_args(args))
-    else:
-        config = vars(parser.parse_args())
-
-    if config['image_source'] is None or not exists(config['image_source']):
-    	raise ValueError("image_source must be a valid directory with images or a single image to classify.")
-    
-    model = load_model(config['saved_model_path'])    
-    image_preds = classify(model, config['image_source'], config['image_dim'])
-    print(json.dumps(image_preds, indent=2), '\n')
-
-
-if __name__ == "__main__":
-	main()
+    # entry_points={
+    #     'console_scripts': ['mycli=mymodule:cli'],
+    # },
+    install_requires=REQUIRED,
+    extras_require=EXTRAS,
+    include_package_data=True,
+    license='GPLv3',
+    classifiers=[
+        # Trove classifiers
+        # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
+        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+        'Programming Language :: Python',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: Implementation :: CPython',
+        'Programming Language :: Python :: Implementation :: PyPy'
+    ],
+    # $ setup.py publish support.
+    cmdclass={
+        'upload': UploadCommand
+    },
+    entry_points="""
+        [console_scripts]
+        nsfw-predict=nsfw_detector.predict:main
+    """
+)

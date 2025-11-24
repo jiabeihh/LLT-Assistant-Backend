@@ -1,372 +1,213 @@
-import sys
-
-import time
 import os
+import glob
+#om nom nom nom
+import requests
+import json
+from pprint import pprint
+import base64
+import numpy as np
+from io import BytesIO
+import extensions.TemporalKit.scripts.berry_utility
+import scripts.optical_flow_simple as opflow
+from PIL import Image, ImageOps,ImageFilter
+import io
+from collections import deque
+import cv2
+import scripts.Berry_Method as bmethod
+import scripts.berry_utility as butility
 import re
-from common.colors import end,W,R,B,bannerblue2
-from common.banner import banner
-from common.requestUp import random_UserAgent
-from common.uriParser import parsing_url
-from modules.wpExploits import(   wp_wysija,
-                                  wp_blaze,
-                                  wp_catpro,
-                                  wp_cherry,
-                                  wp_dm,
-                                  wp_fromcraft,
-                                  wp_jobmanager,
-                                  wp_showbiz,
-                                  wp_synoptic,
-                                  wp_shop,
-                                  wp_powerzoomer,
-                                  wp_revslider,
-                                  wp_adsmanager,
-                                  wp_inboundiomarketing,
-                                  wp_levoslideshow,
-                                  wp_adblockblocker,
-                                )
-
-headers = {
-'host' : 'google.com',
-'User-Agent' : random_UserAgent(),
-'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-'Accept-Language': 'en-US,en;q=0.5',
-'Connection': 'keep-alive',}
-
-history = []
-
-numberpage=1 #default page−dork variable
-output_dir='logs'#default output−dork
-
-W_UL= "\033[4m"
-RED_U='\033[1;1;91m'
 
 
-vulnresults = set()  # results of vulnerability exploits. [success or failed]
-grabinfo = set()  # return cms_detected the version , themes , plugins , user .. 
-subdomains = set() # return subdomains & ip.
-hostinfo = set() # host info
-data = [ vulnresults, grabinfo, subdomains , hostinfo]
 
-data_names = ['vulnresults', 'grabinfo', 'subdomains' , 'hostinfo']
+def sort_into_folders(video_path, fps, per_side, batch_size, _smol_resolution,square_textures,max_frames,output_folder,border):
+    border = 0
+    per_batch_limmit = (((per_side * per_side) * batch_size)) + border
 
-data = {
-    'vulnresults':list(vulnresults),
-    'grabinfo':list(grabinfo),
-    'subdomains':list(subdomains),
-}
-
-class Helpers():
-
-    @staticmethod
-    def _general_help():
-        print("""
-        Command                 Description
-        --------                -------------
-        help/?                  Show this help menu.
-        clear/cls               clear the vulnx screen
-        use       <Variable>    Use an variable.
-        info      <Variable>    Get information about an available variable.
-        set <variable> <value>  Sets a context-specific variable to a value to use while using vulnx.
-        variables               Prints all previously specified variables.
-        banner                  Display banner.
-        history                 Display command-line most important history from the beginning.
-        makerc                  Save command-line history to a file.
-        os         <command>    Execute a system command without closing the vulnx-mode
-        exit/quit               Exit the vulnx-mode
-        """)
-
-    @staticmethod
-    def _url_action_help():
-        print("""
-        Command                 Description
-        --------                -------------
-        help/?                  Show this help menu.
-        timeout                 set timeout
-        ports                   scan ports
-        domain                  get domains & sub domains
-        cms info                get cms info (version , user ..)
-        web info                get web info
-        dump dns                dump dns get sub domains [mx-server..]
-        run exploit             run exploits corresponding to cms
-        clear/cls               clear the vulnx screen
-        history                 Display command-line most important history from the beginning.
-        variables               Prints all previously specified variables.
-        back                    move back from current context
-        """)
-
-    #dorks - command helpers. 
-
-    @staticmethod
-    def _dorks_action_help():
-        print("""
-        Command                 Description
-        --------                -------------
-        help/?                  Show this help menu.
-        list                    list dorks
-        set dork                set exploit name
-        clear/cls               clear the vulnx screen
-        history                 Display command-line most important history from the beginning.
-        variables               Prints all previously specified variables.
-        back                    move back from current context
-        """)
-
-    @staticmethod
-    def _dorks_setdork_help():
-        print("""
-        Command                 Description
-        --------                -------------
-        help/?                  Show this help menu.
-        pages                   set num page
-        output                  output file.
-        run                     search web with specified dork
-        clear/cls               clear the vulnx screen
-        history                 Display command-line most important history from the beginning.
-        variables               Prints all previously specified variables.
-        back                    move back from current context
-        """)
-
-    @staticmethod
-    def _dorks_setdork_page_help():
-        print("""
-        Command                 Description
-        --------                -------------
-        help/?                  Show this help menu.
-        output                  output file.
-        run                     search web with specified dork
-        clear/cls               clear the vulnx screen
-        history                 Display command-line most important history from the beginning.
-        variables               Prints all previously specified variables.
-        back                    move back from current context
-        """)
-
-    @staticmethod
-    def _dorks_setdork_output_help():
-        print("""
-        Command                 Description
-        --------                -------------
-        help/?                  Show this help menu.
-        pages                   set num page
-        run                     search web with specified dork
-        clear/cls               clear the vulnx screen
-        history                 Display command-line most important history from the beginning.
-        variables               Prints all previously specified variables.
-        back                    move back from current context
-        """)
-
-    @staticmethod
-    def _dorks_setdork_page_output_help():
-        print("""
-        Command                 Description
-        --------                -------------
-        help/?                  Show this help menu.
-        run                     search web with specified dork
-        clear/cls               clear the vulnx screen
-        history                 Display command-line most important history from the beginning.
-        variables               Prints all previously specified variables.
-        back                    move back from current context
-        """)
-
-class Cli(object):
-
-    def __runExploits(self,url,headers):
-        wp_wysija(url,headers,vulnresults)
-        wp_blaze(url,headers,vulnresults)
-        wp_catpro(url,headers,vulnresults)
-        wp_cherry(url,headers,vulnresults)
-        wp_dm(url,headers,vulnresults)
-        wp_fromcraft(url,headers,vulnresults)
-        wp_shop(url,headers,vulnresults)
-        wp_revslider(url,headers,vulnresults)
-        wp_adsmanager(url,headers,vulnresults)
-        wp_inboundiomarketing(url,headers,vulnresults)
-        wp_levoslideshow(url,headers,vulnresults)
-        wp_adblockblocker(url,headers,vulnresults)
-
-    @staticmethod
-    def _clearscreen():
-        return os.system('clear')
-
-    @staticmethod
-    def getDork(pattern):
-        dork_search=r'^set dork (.+)'
-        try:
-            dork=re.search(re.compile(dork_search),pattern).group(1)
-        except AttributeError:  # No match is found
-            dork=re.search(re.compile(dork_search),pattern)
-        if dork:
-            return dork
+    frames = []
+  #  original_frames_directory = os.path.join(output_folder, "original_frames")
+  #  if os.path.exists(original_frames_directory):
+  #      for filename in os.listdir(original_frames_directory):
+  #          frames.append(cv2.imread(os.path.join(original_frames_directory, filename), cv2.COLOR_BGR2RGB))
+  #  else:
+    video_data = bmethod.convert_video_to_bytes(video_path)
+    frames = butility.extract_frames_movpie(video_data, fps, max_frames)
     
-    @staticmethod
-    def setPage(page):
-        page_search=r'^page (\d+$)'
-        try:
-            page=re.search(re.compile(page_search),page).group(1)
-        except AttributeError:  # No match is found
-            page=re.search(re.compile(page_search),page)
-        if page:
-            return int(page)
+    print(f"full frames num = {len(frames)}")
 
-    @staticmethod
-    def setOutput(directory):
-        output=r'^output (\w+$)'
-        try:
-            rep=re.search(re.compile(output),directory).group(1)
-        except AttributeError:  # No match is found
-            rep=re.search(re.compile(output),directory)
-        if rep:
-            return rep
 
-    @property
-    def getUrl(self,pattern):
-        url_search=r'^set url (.+)'
-        try:
-            url=re.search(re.compile(url_search),pattern).group(1)
-        except AttributeError:  # No match is found
-            url=re.search(re.compile(url_search),pattern)
-        if url:
-            return url#ParseURL(url)
+    output_frames_folder = os.path.join(output_folder, "frames")
+    if not os.path.exists(output_frames_folder):
+        os.makedirs(output_frames_folder)
+    output_keys_folder = os.path.join(output_folder, "keys")
+    if not os.path.exists(output_keys_folder):
+        os.makedirs(output_keys_folder)
+    input_folder = os.path.join(output_folder, "input")
 
-    def variable(self):
-        print("a")
+    filenames = os.listdir(input_folder)
+    img = Image.open(os.path.join(input_folder, filenames[0]))
+    original_width, original_height = img.size
+    height,width = frames[0].shape[:2]
+    
+    texture_aspect_ratio = float(width) / float(height)
+    
+    
+    _smol_frame_height = _smol_resolution
+    _smol_frame_width = int(_smol_frame_height * texture_aspect_ratio)
+    print(f"saving size = {_smol_frame_width}x{_smol_frame_height}")
 
-    def setdorkCLI(self,cmd_interpreter):
-        
-        # REGEX
 
-        output=re.compile(r'^output \w+$')
-        page=re.compile(r'^page \d+$')
-        dorkname=re.compile(r'^set dork .+')
-        
-        '''SET DORK VARIABLE'''
-        
-        while True:
-            cmd_interpreter=input("%s%svulnx%s%s (%sDorks%s)> %s" %(bannerblue2,W_UL,end,W,B,W,end))
-            if cmd_interpreter == 'back':
-                break
-            if cmd_interpreter == 'list':
+    for i, frame in enumerate(frames):
+        frame_to_save = cv2.resize(frame, (_smol_frame_width, _smol_frame_height), interpolation=cv2.INTER_LINEAR)
+        bmethod.save_square_texture(frame_to_save, os.path.join(output_frames_folder, "frames{:05d}.png".format(i)))
+    original_frame_height,original_frame_width = frames[0].shape[:2]
+    
+
+
+    bigbatches,frameLocs = bmethod.split_frames_into_big_batches(frames, per_batch_limmit,border,ebsynth=True,returnframe_locations=True)
+    bigprocessedbatches = []
+
+    last_frame_end = 0
+    print (len(square_textures))
+    for a,bigbatch in enumerate(bigbatches):
+        batches = bmethod.split_into_batches(bigbatches[a], batch_size,per_side* per_side)
+
+        keyframes = [batch[int(len(batch)/2)] for batch in batches]
+        if a < len(square_textures):
+            resized_square_texture = cv2.resize(square_textures[a], (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+            new_frames = bmethod.split_square_texture(resized_square_texture,len(keyframes), per_side* per_side,_smol_resolution,True)
+            new_frame_start,new_frame_end = frameLocs[a]
             
-                '''SET DORK LIST'''
+            for b in range(len(new_frames)):
+                print (new_frame_start)
+                inner_start = last_frame_end
+                inner_end = inner_start + len(batches[b])
+                last_frame_end = inner_end
+                frame_position  = inner_start + int((inner_end - inner_start)/2)
+                print (f"saving at frame {frame_position}")
+                frame_to_save = cv2.resize(new_frames[b], (_smol_frame_width, _smol_frame_height), interpolation=cv2.INTER_LINEAR)
+                bmethod.save_square_texture(frame_to_save, os.path.join(output_keys_folder, "keys{:05d}.png".format(frame_position)))
+    
+    just_frame_groups = []
+    for i in range(len(bigprocessedbatches)):
+        newgroup = []
+        for b in range(len(bigprocessedbatches[i])):
+            newgroup.append(bigprocessedbatches[i][b])
+        just_frame_groups.append(newgroup)
 
-                print('\n%s[*]%s Listing dorks name..' %(B,end))
-                from modules.dorksEngine import DorkList as DL
-                DL.dorkslist()
-            if cmd_interpreter=='clear' or cmd_interpreter=='cls':
-                Cli._clearscreen()
-            if cmd_interpreter=='exit':
-                sys.exit()
-            if cmd_interpreter == 'help' or cmd_interpreter == '?':
-                Helpers._dorks_action_help()
+    return
 
-                '''SET DORK NAME.'''
 
-            if dorkname.search(cmd_interpreter):
-                while True:
-                    cmd_interpreter_wp=input("%s%svulnx%s%s (%sDorks-%s%s)> %s" %(bannerblue2,W_UL,end,W,B,Cli.getDork(cmd_interpreter),W,end))
+def recombine (video_path, fps, per_side, batch_size, fillindenoise, edgedenoise, _smol_resolution,square_textures,max_frames,output_folder,border):
+    just_frame_groups = []
+    per_batch_limmit = (((per_side * per_side) * batch_size)) - border
+    video_data = bmethod.convert_video_to_bytes(video_path)
+    frames = bmethod.extract_frames_movpie(video_data, fps, max_frames)
+    bigbatches,frameLocs = bmethod.split_frames_into_big_batches(frames, per_batch_limmit,border,returnframe_locations=True)
+    bigprocessedbatches = []
+    for i in range(len(bigprocessedbatches)):
+        newgroup = []
+        for b in range(len(bigprocessedbatches[i])):
+            newgroup.append(bigprocessedbatches[i][b])
+        just_frame_groups.append(newgroup)
 
-                    '''SET PAGE VARIABLE.'''
+    combined = bmethod.merge_image_batches(just_frame_groups, border)
 
-                    if page.search(cmd_interpreter_wp):
-                        while True:
-                            cmd_interpreter_wp_page=input("%s%svulnx%s%s (%sDorks-%s-%s%s)> %s" %(bannerblue2,W_UL,end,W,B,Cli.getDork(cmd_interpreter),Cli.setPage(cmd_interpreter_wp),W,end))
-                            
-                            if output.search(cmd_interpreter_wp_page):
-                                while True:
-                                    cmd_interpreter_wp_page_output=input("%s%svulnx%s%s (%sDorks-%s-%s%s)> %s" %(bannerblue2,W_UL,end,W,B,Cli.getDork(cmd_interpreter),Cli.setPage(cmd_interpreter_wp),W,end))
-                                    
-                                    if cmd_interpreter_wp_page_output=='run':
-                                        print('\n')
-                                        from modules.dorksEngine import Dorks as D
-                                        D.searchengine(Cli.getDork(cmd_interpreter),headers,Cli.setOutput(cmd_interpreter_wp),Cli.setPage(cmd_interpreter_wp))
-                                    if cmd_interpreter_wp_page_output=='back':
-                                        break
-                                    if cmd_interpreter_wp_page_output=='help' or cmd_interpreter_wp_page_output=='?':
-                                        Helpers._dorks_setdork_page_output_help()
-                                    if cmd_interpreter_wp_page_output=='clear' or cmd_interpreter_wp_page_output=='cls':
-                                        Cli._clearscreen()
-                                    if cmd_interpreter_wp_page_output=='exit':
-                                        sys.exit()
-
-                            if cmd_interpreter_wp_page=='run':
-                                print('\n')
-                                from modules.dorksEngine import Dorks as D
-                                D.searchengine(Cli.getDork(cmd_interpreter),headers,output_dir,Cli.setPage(cmd_interpreter_wp))
-                            if cmd_interpreter_wp_page=='back':
-                                break
-                            if cmd_interpreter_wp_page=='help' or cmd_interpreter_wp_page=='?':
-                                Helpers._dorks_setdork_page_help()
-                            if cmd_interpreter_wp_page=='clear' or cmd_interpreter_wp_page=='cls':
-                                Cli._clearscreen()
-                            if cmd_interpreter_wp_page=='exit':
-                                sys.exit()
-
-                    '''SET OUTPUT VARIABLE.'''
-
-                    if output.search(cmd_interpreter_wp):
-                        while True:
-                            cmd_interpreter_wp_output=input("%s%svulnx%s%s (%sDorks-%s%s)> %s" %(bannerblue2,W_UL,end,W,B,Cli.getDork(cmd_interpreter),W,end))
-                            if cmd_interpreter_wp_output=='run':
-                                print('\n')
-                                from modules.dorksEngine import Dorks as D
-                                D.searchengine(Cli.getDork(cmd_interpreter),headers,Cli.setOutput(cmd_interpreter_wp),numberpage)
-                            if cmd_interpreter_wp_output=='back':
-                                break
-                            if cmd_interpreter_wp_output=='clear' or cmd_interpreter_wp_output=='cls':
-                                Cli._clearscreen()
-                            if cmd_interpreter_wp_output=='exit':
-                                sys.exit()
-                            if cmd_interpreter_wp_output=='help' or cmd_interpreter_wp_output=='?':
-                                Helpers._dorks_setdork_output_help()
-
-                    if cmd_interpreter_wp=='run':
-                        print('\n')
-                        from modules.dorksEngine import Dorks as D
-                        D.searchengine(Cli.getDork(cmd_interpreter),headers,output_dir,numberpage)
-                    if cmd_interpreter_wp=='back':
-                        break
-                    if cmd_interpreter_wp=='help' or cmd_interpreter_wp=='?':
-                        Helpers._dorks_setdork_help()
-                    if cmd_interpreter_wp=='clear' or cmd_interpreter_wp=='cls':
-                        Cli._clearscreen()
-                    if cmd_interpreter_wp=='exit':
-                        sys.exit()
+    save_loc = os.path.join(output_folder, "non_blended.mp4")
+    generated_vid = extensions.TemporalKit.scripts.berry_utility.pil_images_to_video(combined,save_loc, fps)
 
 
 
-    def send_commands(self,cmd):
-        reurl=re.compile(r'^set url .+')
-        redork=re.compile(r'^dork')
-        while True:
-            cmd = input("%s%svulnx%s > "% (bannerblue2,W_UL,end))
-            dork_command="dorks"
-            if reurl.search(cmd):
-                #url session
-                while True:
-                    cmd_interpreter=input("%s%svulnx%s%s target(%s%s%s) > %s" %(bannerblue2,W_UL,end,W,R,self.getUrl(cmd),W,end))
-                    if cmd_interpreter == 'back':
-                        break
-                    elif cmd_interpreter == 'run exploit':
-                        print('\n%s[*]%s Running exploits..' %(B,end))
-                        root = self.getUrl(cmd)
-                        if root.startswith('http'):
-                            url_root = root
-                        else:
-                            url_root = 'http://'+url_root
-                        self.__runExploits(url_root,headers)
-                    elif cmd_interpreter == 'help' or cmd_interpreter == '?':
-                        Helpers._url_action_help()
-                    elif cmd == 'quit' or cmd == 'exit':
-                        sys.exit()
-                    else:
-                        print("you mean (cms info) or (web info) show more use help ?")
-            elif redork.search(cmd):
-                #dork session
-                self.setdorkCLI(cmd)
-            elif cmd == 'quit' or cmd == 'exit':
-                sys.exit()
-            elif cmd == 'help' or cmd == '?':
-                Helpers._general_help()
-            elif cmd == 'clear' or cmd == 'cls':
-                Cli._clearscreen()
 
-            else:
-                print("you mean (cms info) or (web info) show more use help ?")
+def crossfade_folder_of_folders(output_folder, fps,return_generated_video_path=False):
+    """Crossfade between images in a folder of folders and save the results."""
+    root_folder = output_folder
+    all_dirs = [d for d in os.listdir(root_folder) if os.path.isdir(os.path.join(root_folder, d))]
+    dirs = [d for d in all_dirs if d.startswith("out_")]
+
+    dirs.sort()
+
+    output_images = []
+    allkeynums = getkeynums(os.path.join(root_folder, "keys"))
+    print(allkeynums)
+
+    for b in range(allkeynums[0]):
+        current_dir = os.path.join(root_folder, dirs[0])
+        images_current = sorted(os.listdir(current_dir))
+        image1_path = os.path.join(current_dir, images_current[b])
+        image1 = Image.open(image1_path)
+        output_images.append(np.array(image1))
+
+    for i in range(len(dirs) - 1):
+        current_dir = os.path.join(root_folder, dirs[i])
+        next_dir = os.path.join(root_folder, dirs[i + 1])
+
+        images_current = sorted(os.listdir(current_dir))
+        images_next = sorted(os.listdir(next_dir))
+
+        startnum = get_num_at_index(current_dir,0)
+        bigkeynum = allkeynums[i]
+        keynum = bigkeynum - startnum
+        print(f"recombining directory {dirs[i]} and {dirs[i+1]}, len {keynum}")
+        
+
+
+
+        for j in range(keynum, len(images_current) - 1):
+            alpha = (j - keynum) / (len(images_current) - keynum)
+            image1_path = os.path.join(current_dir, images_current[j])
+            next_image_index = j - keynum if j - keynum < len(images_next) else len(images_next) - 1
+            image2_path = os.path.join(next_dir, images_next[next_image_index])
+
+            image1 = Image.open(image1_path)
+            image2 = Image.open(image2_path)
+
+            blended_image = butility.crossfade_images(image1, image2, alpha)
+            output_images.append(np.array(blended_image))
+            # blended_image.save(os.path.join(output_folder, f"{dirs[i]}_{dirs[i+1]}_crossfade_{j:04}.png"))
+
+    final_dir = os.path.join(root_folder, dirs[-1])
+    final_dir_images = sorted(os.listdir(final_dir))
+    start_point = len(final_dir_images) // 2
+    print(f"going from dir {start_point} to end at {len(final_dir_images)}")
+
+    for c in range(start_point, len(final_dir_images)):
+        image1_path = os.path.join(final_dir, final_dir_images[c])
+        image1 = Image.open(image1_path)
+        output_images.append(np.array(image1))
+        
+
+    print (f"outputting {len(output_images)} images")
+    output_save_location = os.path.join(output_folder, "crossfade.mp4")
+    generated_vid = extensions.TemporalKit.scripts.berry_utility.pil_images_to_video(output_images, output_save_location, fps)
+     
+    if return_generated_video_path == True:
+        return generated_vid
+    else: 
+        return output_images
+
+def getkeynums (folder_path):
+    filenames = os.listdir(folder_path)
+
+    # Filter filenames to keep only the ones starting with "keys" and ending with ".png"
+    keys_filenames = [f for f in filenames if f.startswith("keys") and f.endswith(".png")]
+
+    # Sort the filtered filenames
+    sorted_keys_filenames = sorted(keys_filenames, key=lambda f: int(re.search(r'(\d+)', f).group(0)))
+
+    # Extract the numbers from the sorted filenames
+    return [int(re.search(r'(\d+)', f).group(0)) for f in sorted_keys_filenames]
+
+
+def get_num_at_index(folder_path,index):
+    """Get the starting number of the output images in a folder."""
+    filenames = os.listdir(folder_path)
+
+    # Filter filenames to keep only the ones starting with "keys" and ending with ".png"
+    #keys_filenames = [f for f in filenames if f.startswith("keys") and f.endswith(".png")]
+
+    # Sort the filtered filenames
+    sorted_keys_filenames = sorted(filenames, key=lambda f: int(re.search(r'(\d+)', f).group(0)))
+
+    # Extract the numbers from the sorted filenames
+    numbers = [int(re.search(r'(\d+)', f).group(0)) for f in sorted_keys_filenames]
+    return numbers[index]

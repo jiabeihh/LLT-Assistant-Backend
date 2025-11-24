@@ -1,175 +1,146 @@
-#!/usr/bin/env python
-import argparse
-import os
-import shutil
-import sys
-from subprocess import call
-import textwrap
+"""
+AWS-specific checks. Part of the cloud_enum package available at
+github.com/initstring/cloud_enum
+"""
+
+from enum_tools import utils
+
+BANNER = '''
+++++++++++++++++++++++++++
+      amazon checks
+++++++++++++++++++++++++++
+'''
+
+# Known S3 domain names
+S3_URL = 's3.amazonaws.com'
+APPS_URL = 'awsapps.com'
+
+# Known AWS region names. This global will be used unless the user passes
+# in a specific region name. (NOT YET IMPLEMENTED)
+AWS_REGIONS = ['amazonaws.com',
+               'ap-east-1.amazonaws.com',
+               'us-east-2.amazonaws.com',
+               'us-west-1.amazonaws.com',
+               'us-west-2.amazonaws.com',
+               'ap-south-1.amazonaws.com',
+               'ap-northeast-1.amazonaws.com',
+               'ap-northeast-2.amazonaws.com',
+               'ap-northeast-3.amazonaws.com',
+               'ap-southeast-1.amazonaws.com',
+               'ap-southeast-2.amazonaws.com',
+               'ca-central-1.amazonaws.com',
+               'cn-north-1.amazonaws.com.cn',
+               'cn-northwest-1.amazonaws.com.cn',
+               'eu-central-1.amazonaws.com',
+               'eu-west-1.amazonaws.com',
+               'eu-west-2.amazonaws.com',
+               'eu-west-3.amazonaws.com',
+               'eu-north-1.amazonaws.com',
+               'sa-east-1.amazonaws.com']
 
 
-try:
-    WindowsError
-except NameError:
-    IS_WIN = False
-    PIP = '/bin/pip'
-    PIPSI = '/bin/pipsi'
-else:
-    IS_WIN = True
-    PIP = '/Scripts/pip.exe'
-    PIPSI = '/Scripts/pipsi.exe'
+def print_s3_response(reply):
+    """
+    Parses the HTTP reply of a brute-force attempt
 
-try:
-    import virtualenv
-    venv_pkg = 'virtualenv'
-    del virtualenv
-except ImportError:
-    try:
-        import venv
-        venv_pkg = 'venv'
-        del venv
-    except ImportError:
-        venv_pkg = None
+    This function is passed into the class object so we can view results
+    in real-time.
+    """
+    data = {'platform': 'aws', 'msg': '', 'target': '', 'access': ''}
 
-DEFAULT_PIPSI_HOME = os.path.expanduser('~/.local/venvs')
-DEFAULT_PIPSI_BIN_DIR = os.path.expanduser('~/.local/bin')
-
-
-def echo(msg=''):
-    sys.stdout.write(msg + '\n')
-    sys.stdout.flush()
-
-
-def fail(msg):
-    sys.stderr.write(msg + '\n')
-    sys.stderr.flush()
-    sys.exit(1)
-
-
-def succeed(msg):
-    echo(msg)
-    sys.exit(0)
-
-
-def command_exists(cmd):
-    with open(os.devnull, 'w') as null:
-        try:
-            return call(
-                [cmd, '--version'],
-                stdout=null, stderr=null) == 0
-        except OSError:
-            return False
-
-
-def publish_script(venv, bin_dir):
-    if IS_WIN:
-        for name in os.listdir(venv + '/Scripts'):
-            if 'pipsi' in name.lower():
-                shutil.copy(venv + '/Scripts/' + name, bin_dir)
-    else:
-        os.symlink(venv + '/bin/pipsi', bin_dir + '/pipsi')
-    echo('Installed pipsi binary in ' + bin_dir)
-
-
-def install_files(venv, bin_dir, install):
-    try:
-        os.makedirs(bin_dir)
-    except OSError:
+    if reply.status_code == 404:
         pass
-
-    def _cleanup():
-        try:
-            shutil.rmtree(venv)
-        except (OSError, IOError):
-            pass
-
-    venv_cmd = [sys.executable, '-m', venv_pkg]
-    if venv_pkg == 'virtualenv':
-        venv_cmd += ['-p', sys.executable]
-    venv_cmd += [venv]
-
-    if call(venv_cmd) != 0:
-        _cleanup()
-        fail('Could not create virtualenv for pipsi :(')
-
-    if call([venv + PIP, 'install', install]) != 0:
-        _cleanup()
-        fail('Could not install pipsi :(')
-
-    publish_script(venv, bin_dir)
-
-
-def parse_options(argv):
-    bin_dir = os.environ.get('PIPSI_BIN_DIR', DEFAULT_PIPSI_BIN_DIR)
-    home_dir = os.environ.get('PIPSI_HOME', DEFAULT_PIPSI_HOME)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--bin-dir',
-        default=bin_dir,
-        help=(
-            'Executables will be installed into this folder. '
-            'Default: %(default)s'
-        ),
-    )
-    parser.add_argument(
-        '--home',
-        dest='home_dir',
-        default=home_dir,
-        help='Virtualenvs are created in this folder. Default: %(default)s',
-    )
-    parser.add_argument(
-        '--src',
-        default='pipsi',
-        help=(
-            'The specific version of pipsi to install. This value is passed '
-            'to "pip install <value>". For example, to install from master '
-            'use "git+https://github.com/mitsuhiko/pipsi.git#egg=pipsi". '
-            'Default: %(default)s'
-        ),
-    )
-    parser.add_argument(
-        '--ignore-existing',
-        action='store_true',
-        help=(
-            "ignore versions of pipsi already installed. "
-            "Use this to ignore a package manager based install or for testing"
-        ),
-    )
-    return parser.parse_args(argv)
-
-
-def main(argv=sys.argv[1:]):
-    args = parse_options(argv)
-
-    if command_exists('pipsi') and not args.ignore_existing:
-        succeed('You already have pipsi installed')
+    elif 'Bad Request' in reply.reason:
+        pass
+    elif reply.status_code == 200:
+        data['msg'] = 'OPEN S3 BUCKET'
+        data['target'] = reply.url
+        data['access'] = 'public'
+        utils.fmt_output(data)
+        utils.list_bucket_contents(reply.url)
+    elif reply.status_code == 403:
+        data['msg'] = 'Protected S3 Bucket'
+        data['target'] = reply.url
+        data['access'] = 'protected'
+        utils.fmt_output(data)
+    elif 'Slow Down' in reply.reason:
+        print("[!] You've been rate limited, skipping rest of check...")
+        return 'breakout'
     else:
-        echo('Installing pipsi')
+        print(f"    Unknown status codes being received from {reply.url}:\n"
+              "       {reply.status_code}: {reply.reason}")
 
-    if venv_pkg is None:
-        fail('You need to have virtualenv installed to bootstrap pipsi.')
-
-    venv = os.path.join(args.home_dir, 'pipsi')
-    install_files(venv, args.bin_dir, args.src)
-
-    if not command_exists('pipsi'):
-        echo(textwrap.dedent(
-            '''
-            %(sep)s
-
-            Warning:
-              It looks like %(bin_dir)s is not on your PATH so pipsi will not
-              work out of the box. To fix this problem make sure to add this to
-              your .bashrc / .profile file:
-
-              export PATH=%(bin_dir)s:$PATH
-
-            %(sep)s
-            ''' % dict(sep='=' * 60, bin_dir=args.bin_dir)
-        ))
-
-    succeed('pipsi is now installed.')
+    return None
 
 
-if __name__ == '__main__':
-    main()
+def check_s3_buckets(names, threads):
+    """
+    Checks for open and restricted Amazon S3 buckets
+    """
+    print("[+] Checking for S3 buckets")
+
+    # Start a counter to report on elapsed time
+    start_time = utils.start_timer()
+
+    # Initialize the list of correctly formatted urls
+    candidates = []
+
+    # Take each mutated keyword craft a url with the correct format
+    for name in names:
+        candidates.append(f'{name}.{S3_URL}')
+
+    # Send the valid names to the batch HTTP processor
+    utils.get_url_batch(candidates, use_ssl=False,
+                        callback=print_s3_response,
+                        threads=threads)
+
+    # Stop the time
+    utils.stop_timer(start_time)
+
+
+def check_awsapps(names, threads, nameserver, nameserverfile=False):
+    """
+    Checks for existence of AWS Apps
+    (ie. WorkDocs, WorkMail, Connect, etc.)
+    """
+    data = {'platform': 'aws', 'msg': 'AWS App Found:', 'target': '', 'access': ''}
+
+    print("[+] Checking for AWS Apps")
+
+    # Start a counter to report on elapsed time
+    start_time = utils.start_timer()
+
+    # Initialize the list of domain names to look up
+    candidates = []
+
+    # Initialize the list of valid hostnames
+    valid_names = []
+
+    # Take each mutated keyword craft a domain name to lookup.
+    for name in names:
+        candidates.append(f'{name}.{APPS_URL}')
+
+    # AWS Apps use DNS sub-domains. First, see which are valid.
+    valid_names = utils.fast_dns_lookup(candidates, nameserver,
+                                        nameserverfile, threads=threads)
+
+    for name in valid_names:
+        data['target'] = f'https://{name}'
+        data['access'] = 'protected'
+        utils.fmt_output(data)
+
+    # Stop the timer
+    utils.stop_timer(start_time)
+
+
+def run_all(names, args):
+    """
+    Function is called by main program
+    """
+    print(BANNER)
+
+    # Use user-supplied AWS region if provided
+    # if not regions:
+    #    regions = AWS_REGIONS
+    check_s3_buckets(names, args.threads)
+    check_awsapps(names, args.threads, args.nameserver, args.nameserverfile)

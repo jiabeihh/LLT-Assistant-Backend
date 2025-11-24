@@ -1,149 +1,108 @@
-# Copyright 2025 DeepMind Technologies Limited. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-"""Utilities for implementing tools."""
+import torch
+import torch.nn as nn
+from torch.autograd import Variable
 
-from typing import Any, Callable, Collection, Union
+from embed_regularize import embedded_dropout
+from locked_dropout import LockedDropout
+from weight_drop import WeightDrop
 
-from google.genai import _transformers
-from google.genai import types as genai_types
+class RNNModel(nn.Module):
+    """Container module with an encoder, a recurrent module, and a decoder."""
 
+    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, dropout=0.5, dropouth=0.5, dropouti=0.5, dropoute=0.1, wdrop=0, tie_weights=False):
+        super(RNNModel, self).__init__()
+        self.lockdrop = LockedDropout()
+        self.idrop = nn.Dropout(dropouti)
+        self.hdrop = nn.Dropout(dropouth)
+        self.drop = nn.Dropout(dropout)
+        self.encoder = nn.Embedding(ntoken, ninp)
+        assert rnn_type in ['LSTM', 'QRNN', 'GRU'], 'RNN type is not supported'
+        if rnn_type == 'LSTM':
+            self.rnns = [torch.nn.LSTM(ninp if l == 0 else nhid, nhid if l != nlayers - 1 else (ninp if tie_weights else nhid), 1, dropout=0) for l in range(nlayers)]
+            if wdrop:
+                self.rnns = [WeightDrop(rnn, ['weight_hh_l0'], dropout=wdrop) for rnn in self.rnns]
+        if rnn_type == 'GRU':
+            self.rnns = [torch.nn.GRU(ninp if l == 0 else nhid, nhid if l != nlayers - 1 else ninp, 1, dropout=0) for l in range(nlayers)]
+            if wdrop:
+                self.rnns = [WeightDrop(rnn, ['weight_hh_l0'], dropout=wdrop) for rnn in self.rnns]
+        elif rnn_type == 'QRNN':
+            from torchqrnn import QRNNLayer
+            self.rnns = [QRNNLayer(input_size=ninp if l == 0 else nhid, hidden_size=nhid if l != nlayers - 1 else (ninp if tie_weights else nhid), layer_norm=True, save_prev_x=True, zoneout=0, window=2 if l == 0 else 1, output_gate=True) for l in range(nlayers)]
+            for rnn in self.rnns:
+                rnn.linear = WeightDrop(rnn.linear, ['weight'], dropout=wdrop)
+        print(self.rnns)
+        self.rnns = torch.nn.ModuleList(self.rnns)
+        self.decoder = nn.Linear(nhid, ntoken)
 
-def raise_for_gemini_server_side_tools(
-    tools: list[genai_types.Tool], *, allow_list: Collection[str] = ()
-) -> None:
-  """Raises ValueError if the tool list contains a server-side tool.
+        # Optionally tie weights as in:
+        # "Using the Output Embedding to Improve Language Models" (Press & Wolf 2016)
+        # https://arxiv.org/abs/1608.05859
+        # and
+        # "Tying Word Vectors and Word Classifiers: A Loss Framework for Language Modeling" (Inan et al. 2016)
+        # https://arxiv.org/abs/1611.01462
+        if tie_weights:
+            #if nhid != ninp:
+            #    raise ValueError('When using the tied flag, nhid must be equal to emsize')
+            self.decoder.weight = self.encoder.weight
 
-  Gemini API provides a set of server-side tools. In general, they are not
-  available on other LLM implementations. This helper method allows to warn the
-  developer if they try use this unimplemented functionality.
+        self.init_weights()
 
-  Args:
-    tools: List of tools.
-    allow_list: List of server-side tools to allow.
-  """
-  for tool in tools:
-    for tool_name in (
-        'retrieval',
-        'google_search',
-        'google_search_retrieval',
-        'enterprise_web_search',
-        'google_maps',
-        'url_context',
-        'code_execution',
-        'computer_use',
-    ):
-      if getattr(tool, tool_name) is not None and tool_name not in allow_list:
-        raise ValueError(f'Tool {tool_name} is not supported.')
+        self.rnn_type = rnn_type
+        self.ninp = ninp
+        self.nhid = nhid
+        self.nlayers = nlayers
+        self.dropout = dropout
+        self.dropouti = dropouti
+        self.dropouth = dropouth
+        self.dropoute = dropoute
+        self.tie_weights = tie_weights
 
+    def reset(self):
+        if self.rnn_type == 'QRNN': [r.reset() for r in self.rnns]
 
-def to_schema(
-    schema: Union[genai_types.SchemaUnion, genai_types.SchemaUnionDict],
-) -> genai_types.Schema:
-  """Returns a JSON schema given a Python object representing the schema.
+    def init_weights(self):
+        initrange = 0.1
+        self.encoder.weight.data.uniform_(-initrange, initrange)
+        self.decoder.bias.data.fill_(0)
+        self.decoder.weight.data.uniform_(-initrange, initrange)
 
-  GenAI SDK accepts a variety of Python objects, such as Enum, dataclass or a
-  dictionary of Schema objects as schemas. This provides an easy way to
-  constrain the LLM to generate JSON compatible with the needed type. This
-  utility is useful for defining the expected structure of data for tool calling
-  or constrained decoding with a model.
+    def forward(self, input, hidden, return_h=False):
+        emb = embedded_dropout(self.encoder, input, dropout=self.dropoute if self.training else 0)
+        #emb = self.idrop(emb)
 
-  Usage:
-    json_schema = to_schema(...).json_schema.model_dump(
-        mode='json', exclude_unset=True)
+        emb = self.lockdrop(emb, self.dropouti)
 
-  Args:
-    schema: The Python object representing the schema to convert. See
-      https://ai.google.dev/gemini-api/docs/structured-output for the supported
-        types.
+        raw_output = emb
+        new_hidden = []
+        #raw_output, hidden = self.rnn(emb, hidden)
+        raw_outputs = []
+        outputs = []
+        for l, rnn in enumerate(self.rnns):
+            current_input = raw_output
+            raw_output, new_h = rnn(raw_output, hidden[l])
+            new_hidden.append(new_h)
+            raw_outputs.append(raw_output)
+            if l != self.nlayers - 1:
+                #self.hdrop(raw_output)
+                raw_output = self.lockdrop(raw_output, self.dropouth)
+                outputs.append(raw_output)
+        hidden = new_hidden
 
-  Returns:
-    A `genai_types.Schema` object representing the schema.
-  """
-  return _transformers.t_schema(  # pytype: disable=wrong-arg-types
-      _FakeClient(), schema
-  )
+        output = self.lockdrop(raw_output, self.dropout)
+        outputs.append(output)
 
+        decoded = self.decoder(output.view(output.size(0)*output.size(1), output.size(2)))
+        result = decoded.view(output.size(0), output.size(1), decoded.size(1))
+        if return_h:
+            return result, hidden, raw_outputs, outputs
+        return result, hidden
 
-def to_json_schema(
-    schema: Union[genai_types.SchemaUnion, genai_types.SchemaUnionDict, None],
-) -> str | None:
-  """Returns a JSON schema given a Python object representing the schema.
-
-  GenAI SDK accepts a variety of Python objects, such as Enum, dataclass or a
-  dictionary of Schema objects as schemas. This provides an easy way to
-  constrain the LLM to generate JSON compatible with the needed type. This
-  utility is useful for defining the expected structure of data for tool calling
-  or constrained decoding with a model.
-
-  Args:
-    schema: The Python object representing the schema to convert. See
-      https://ai.google.dev/gemini-api/docs/structured-output for the supported
-        types.
-
-  Returns:
-    A `genai_types.Schema` object representing the schema or None if the given
-    `schema` was None.
-  """
-
-  if schema:
-    return to_schema(schema).json_schema.model_dump(
-        mode='json', exclude_unset=True
-    )
-  else:
-    return None
-
-
-def to_function_declarations(
-    tool_list: list[genai_types.Tool | Callable[..., Any]],
-) -> list[genai_types.FunctionDeclaration]:
-  """Converts a list of tools to a list of function declarations."""
-  tools: list[genai_types.Tool] = []
-  for t in tool_list:
-    if callable(t):
-      fdecl = genai_types.FunctionDeclaration.from_callable_with_api_option(
-          callable=t, api_option='GEMINI_API'
-      )
-      tools.append(genai_types.Tool(function_declarations=[fdecl]))
-    else:
-      tools.append(t)
-  raise_for_gemini_server_side_tools(tools)
-
-  function_declarations: list[genai_types.FunctionDeclaration] = []
-  for tool in tools:
-    function_declarations.extend(tool.function_declarations or ())
-
-  return function_declarations
-
-
-def function_declaration_to_json(
-    fdecl: genai_types.FunctionDeclaration,
-) -> dict[str, Any]:
-  """Returns a JSON representation of a FunctionDeclaration."""
-  return {
-      'type': 'function',
-      'function': {
-          'name': fdecl.name,
-          'description': fdecl.description,
-          'parameters': to_json_schema(fdecl.parameters),
-      },
-  }
-
-
-# TODO(kibergus): Remove this hack once Genai SDK allows None as the client.
-class _FakeClient:
-  """A fake genai client to invoke t_schema."""
-
-  def __init__(self):
-    self.vertexai = False
+    def init_hidden(self, bsz):
+        weight = next(self.parameters()).data
+        if self.rnn_type == 'LSTM':
+            return [(Variable(weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_()),
+                    Variable(weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_()))
+                    for l in range(self.nlayers)]
+        elif self.rnn_type == 'QRNN' or self.rnn_type == 'GRU':
+            return [Variable(weight.new(1, bsz, self.nhid if l != self.nlayers - 1 else (self.ninp if self.tie_weights else self.nhid)).zero_())
+                    for l in range(self.nlayers)]

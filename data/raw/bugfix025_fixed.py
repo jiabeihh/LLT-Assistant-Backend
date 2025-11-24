@@ -1,153 +1,152 @@
-
 #!/usr/bin/env python
 
-from __future__ import (absolute_import, division, print_function)
-
-"""
-The vulnx main part.
-Author: anouarbensaad
-Desc  : CMS-Detector and Vulnerability Scanner & exploiter
-Copyright (c)
-See the file 'LICENSE' for copying permission
-"""
-
-from modules.detector import CMS
-from modules.dorks.engine import Dork
-from modules.dorks.helpers import DorkManual
-from common.colors import red, green, bg, G, R, W, Y, G, good, bad, run, info, end, que, bannerblue2
-
-from common.requestUp import random_UserAgent
-from common.uriParser import parsing_url as hostd
-from common.banner import banner
-
-import sys
-import argparse
 import re
-import os
-import socket
-import common
-import warnings
-import signal
-import requests
+from itertools import chain
+from pathlib import Path
+
+from setuptools import Command
+from setuptools import find_packages
+from setuptools import setup
+
+try:
+    # https://setuptools.pypa.io/en/latest/deprecated/distutils-legacy.html
+    from setuptools.command.build import build
+except ImportError:
+    from distutils.command.build import build
+
+from setuptools.command.develop import develop
+from setuptools.command.easy_install import easy_install
+from setuptools.command.install_lib import install_lib
 
 
-warnings.filterwarnings(
-    action="ignore", message=".*was already imported", category=UserWarning)
-warnings.filterwarnings(action="ignore", category=DeprecationWarning)
-
-# cleaning screen
-
-banner()
-
-def parser_error(errmsg):
-    print("Usage: python " + sys.argv[0] + " [Options] use -h for help")
-    print(R + "Error: " + errmsg + W)
-    sys.exit()
+def read(*names, **kwargs):
+    with Path(__file__).parent.joinpath(*names).open(encoding=kwargs.get('encoding', 'utf8')) as fh:
+        return fh.read()
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        epilog='\tExample: \r\npython ' + sys.argv[0] + " -u google.com")
-    parser.error = parser_error
-    parser._optionals.title = "\nOPTIONS"
-    parser.add_argument('-u', '--url', help="url target to scan")
-    parser.add_argument(
-        '-D', '--dorks', help='search webs with dorks', dest='dorks', type=str)
-    parser.add_argument(
-        '-o', '--output', help='specify output directory', required=False)
-    parser.add_argument('-n', '--number-pages',
-                        help='search dorks number page limit', dest='numberpage', type=int)
-    parser.add_argument('-i', '--input', help='specify input file of domains to scan', dest='input_file', required=False)
-    parser.add_argument('-l', '--dork-list', help='list names of dorks exploits', dest='dorkslist',
-                        choices=['wordpress', 'prestashop', 'joomla', 'lokomedia', 'drupal', 'all'])
-    parser.add_argument('-p',  '--ports', help='ports to scan',
-                        dest='scanports', type=int)
-    # Switches
-    parser.add_argument('-e', '--exploit', help='searching vulnerability & run exploits',
-                        dest='exploit', action='store_true')
-    parser.add_argument('--it', help='interactive mode.',
-                        dest='cli', action='store_true')
+class BuildWithPTH(build):
+    def run(self, *args, **kwargs):
+        super().run(*args, **kwargs)
+        path = str(Path(__file__).parent / 'src' / 'pytest-cov.pth')
+        dest = str(Path(self.build_lib) / Path(path).name)
+        self.copy_file(path, dest)
 
-    parser.add_argument('--cms', help='search cms info[themes,plugins,user,version..]',
-                        dest='cms', action='store_true')
 
-    parser.add_argument('-w', '--web-info', help='web informations gathering',
-                        dest='webinfo', action='store_true')
-    parser.add_argument('-d', '--domain-info', help='subdomains informations gathering',
-                        dest='subdomains', action='store_true')
-    parser.add_argument('--dns', help='dns informations gatherings',
-                        dest='dnsdump', action='store_true')
+class EasyInstallWithPTH(easy_install):
+    def run(self, *args, **kwargs):
+        super().run(*args, **kwargs)
+        path = str(Path(__file__).parent / 'src' / 'pytest-cov.pth')
+        dest = str(Path(self.install_dir) / Path(path).name)
+        self.copy_file(path, dest)
 
-    return parser.parse_args()
 
-# args declaration
-args = parse_args()
-# url arg
-url = args.url
-# interactive arugment
-cli = args.cli
-# input_file
-input_file = args.input_file
-# Disable SSL related warnings
-warnings.filterwarnings('ignore')
+class InstallLibWithPTH(install_lib):
+    def run(self, *args, **kwargs):
+        super().run(*args, **kwargs)
+        path = str(Path(__file__).parent / 'src' / 'pytest-cov.pth')
+        dest = str(Path(self.install_dir) / Path(path).name)
+        self.copy_file(path, dest)
+        self.outputs = [dest]
 
-def detection():
-    instance = CMS(
-        url,
-        headers=headers,
-        exploit=args.exploit,
-        domain=args.subdomains,
-        webinfo=args.webinfo,
-        serveros=True,
-        cmsinfo=args.cms,
-        dnsdump=args.dnsdump,
-        port=args.scanports
-            )
-    instance.instanciate()
+    def get_outputs(self):
+        return chain(super().get_outputs(), self.outputs)
 
-def dork_engine():
-    if args.dorks:
-        DEngine = Dork(
-            exploit=args.dorks,
-            headers=headers,
-            pages=(args.numberpage or 1)
-            )
-        DEngine.search()
 
-def dorks_manual():
-    if args.dorkslist:
-        DManual = DorkManual(
-            select=args.dorkslist
-            )
-        DManual.list()
+class DevelopWithPTH(develop):
+    def run(self, *args, **kwargs):
+        super().run(*args, **kwargs)
+        path = str(Path(__file__).parent / 'src' / 'pytest-cov.pth')
+        dest = str(Path(self.install_dir) / Path(path).name)
+        self.copy_file(path, dest)
 
-def interactive_cli():
-    print('a')
 
-def signal_handler(signal, frame):
-    print("%s(ID: {}) Cleaning up...\n Exiting...".format(signal) % (W))
-    exit(0)
+class GeneratePTH(Command):
+    user_options = ()
 
-signal.signal(signal.SIGINT, signal_handler)
+    def initialize_options(self):
+        pass
 
-if __name__ == "__main__":
+    def finalize_options(self):
+        pass
 
-    headers = {
-        'User-Agent': random_UserAgent(),
-        'Content-type' : '*/*',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-    }
-    dork_engine()
-    dorks_manual()
-    if url:
-        root = url
-        if root.startswith('http://'):
-            url = root
-        elif root.startswith('https://'):
-            url=root.replace('https://','http://')
-        else:
-            url = 'http://'+root
-            print(url)
-        detection()
+    def run(self):
+        with Path(__file__).parent.joinpath('src', 'pytest-cov.pth').open('w') as fh:
+            with Path(__file__).parent.joinpath('src', 'pytest-cov.embed').open() as sh:
+                fh.write(f'import os, sys;exec({sh.read().replace("    ", " ")!r})')
+
+
+setup(
+    name='pytest-cov',
+    version='6.2.0',
+    license='MIT',
+    description='Pytest plugin for measuring coverage.',
+    long_description='{}\n{}'.format(read('README.rst'), re.sub(':[a-z]+:`~?(.*?)`', r'``\1``', read('CHANGELOG.rst'))),
+    author='Marc Schlaich',
+    author_email='marc.schlaich@gmail.com',
+    url='https://github.com/pytest-dev/pytest-cov',
+    packages=find_packages('src'),
+    package_dir={'': 'src'},
+    py_modules=[path.stem for path in Path('src').glob('*.py')],
+    include_package_data=True,
+    zip_safe=False,
+    classifiers=[
+        # complete classifier list: http://pypi.python.org/pypi?%3Aaction=list_classifiers
+        'Development Status :: 5 - Production/Stable',
+        'Framework :: Pytest',
+        'Intended Audience :: Developers',
+        'Operating System :: Microsoft :: Windows',
+        'Operating System :: POSIX',
+        'Operating System :: Unix',
+        'Programming Language :: Python',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3 :: Only',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: Implementation :: CPython',
+        'Programming Language :: Python :: Implementation :: PyPy',
+        'Topic :: Software Development :: Testing',
+        'Topic :: Utilities',
+    ],
+    project_urls={
+        'Documentation': 'https://pytest-cov.readthedocs.io/',
+        'Changelog': 'https://pytest-cov.readthedocs.io/en/latest/changelog.html',
+        'Issue Tracker': 'https://github.com/pytest-dev/pytest-cov/issues',
+    },
+    keywords=[
+        'cover',
+        'coverage',
+        'pytest',
+        'py.test',
+        'distributed',
+        'parallel',
+    ],
+    python_requires='>=3.9',
+    install_requires=[
+        'pytest>=6.2.5',
+        'coverage[toml]>=7.5',
+        'pluggy>=1.2',
+    ],
+    extras_require={
+        'testing': [
+            'fields',
+            'hunter',
+            'process-tests',
+            'pytest-xdist',
+            'virtualenv',
+        ]
+    },
+    entry_points={
+        'pytest11': [
+            'pytest_cov = pytest_cov.plugin',
+        ],
+    },
+    cmdclass={
+        'build': BuildWithPTH,
+        'easy_install': EasyInstallWithPTH,
+        'install_lib': InstallLibWithPTH,
+        'develop': DevelopWithPTH,
+        'genpth': GeneratePTH,
+    },
+)

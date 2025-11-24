@@ -1,65 +1,48 @@
-from zstandard import ZstdDecompressor
+from config import config
+from data_utils import CoNLLDataset, get_vocabs, UNK, NUM, \
+    get_glove_vocab, write_vocab, load_vocab, get_char_vocab, \
+    export_trimmed_glove_vectors, get_processing_word
 
-class BlockDecompressorReader:
-	#Position in decompressed data
-	Position = 0
-	BlockHeader = None
-	CurrentBlock = b""
-	CurrentBlockId = -1
 
-	def __init__(self, nspf, BlockHeader):
-		self.BlockHeader = BlockHeader
-		initialOffset = nspf.tell()
-		self.nspf = nspf
-		if BlockHeader.blockSizeExponent < 14 or BlockHeader.blockSizeExponent > 32:
-			raise ValueError("Corrupted NCZBLOCK header: Block size must be between 14 and 32")
-		self.BlockSize = 2**BlockHeader.blockSizeExponent
-		self.CompressedBlockOffsetList = [initialOffset]
+def build_data(config):
+    """
+    Procedure to build data
 
-		for compressedBlockSize in BlockHeader.compressedBlockSizeList[:-1]:
-			self.CompressedBlockOffsetList.append(self.CompressedBlockOffsetList[-1] + compressedBlockSize)
+    Args:
+        config: defines attributes needed in the function
+    Returns:
+        creates vocab files from the datasets
+        creates a npz embedding file from trimmed glove vectors
+    """
+    processing_word = get_processing_word(lowercase=config.lowercase)
 
-		self.CompressedBlockSizeList = BlockHeader.compressedBlockSizeList
+    # Generators
+    dev   = CoNLLDataset(config.dev_filename, processing_word)
+    test  = CoNLLDataset(config.test_filename, processing_word)
+    train = CoNLLDataset(config.train_filename, processing_word)
 
-	def __decompressBlock(self, blockID):
-		if self.CurrentBlockId == blockID:
-			return self.CurrentBlock
-		decompressedBlockSize = self.BlockSize
-		if blockID >= len(self.CompressedBlockOffsetList) - 1:
-			if blockID >= len(self.CompressedBlockOffsetList):
-				raise EOFError("BlockID exceeds the amounts of compressed blocks in that file!")
-			decompressedBlockSize = self.BlockHeader.decompressedSize % self.BlockSize
-		self.nspf.seek(self.CompressedBlockOffsetList[blockID])
-		if self.CompressedBlockSizeList[blockID] < decompressedBlockSize:
-			self.CurrentBlock = ZstdDecompressor().decompress(self.nspf.read(self.CompressedBlockSizeList[blockID]))
-		else:
-			self.CurrentBlock = self.nspf.read(decompressedBlockSize)
-		self.CurrentBlockId = blockID
-		return self.CurrentBlock
+    # Build Word and Tag vocab
+    vocab_words, vocab_tags = get_vocabs([train, dev, test])
+    vocab_glove = get_glove_vocab(config.glove_filename)
 
-	def seek(self, offset, whence = 0):
-		if whence == 0:
-			self.Position = offset
-		elif whence == 1:
-			self.Position += offset
-		elif whence == 2:
-			self.Position = self.BlockHeader.decompressedSize + offset
-		else:
-			raise ValueError("whence argument must be 0, 1 or 2")
+    vocab = vocab_words & vocab_glove
+    vocab.add(UNK)
+    vocab.add(NUM)
 
-	def read(self, length):
-		buffer = b""
-		blockOffset = self.Position%self.BlockSize
-		blockID = self.Position//self.BlockSize
+    # Save vocab
+    write_vocab(vocab, config.words_filename)
+    write_vocab(vocab_tags, config.tags_filename)
 
-		while(len(buffer) - blockOffset < length):
-			if blockID >= len(self.CompressedBlockOffsetList):
-				break
+    # Trim GloVe Vectors
+    vocab = load_vocab(config.words_filename)
+    export_trimmed_glove_vectors(vocab, config.glove_filename, 
+                                config.trimmed_filename, config.dim)
 
-			buffer += self.__decompressBlock(blockID)
-			blockID += 1
+    # Build and save char vocab
+    train = CoNLLDataset(config.train_filename)
+    vocab_chars = get_char_vocab(train)
+    write_vocab(vocab_chars, config.chars_filename)
 
-		buffer = buffer[blockOffset:blockOffset+length]
-		self.Position += length
 
-		return buffer
+if __name__ == "__main__":
+    build_data(config)

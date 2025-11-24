@@ -1,168 +1,257 @@
-#!/usr/bin/env python3
-import argparse
-import base64
+"""
+Helper functions for network requests, etc
+"""
+
+import time
+import sys
 import datetime
-import glob
-import hashlib
-import json
-import os
-import sqlite3
-import struct
-import requests
-import subprocess
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cores.pypush_gsa_icloud import icloud_login_mobileme, generate_anisette_headers
-script_name = 'advanced_map_loc.py'
+import re
+from multiprocessing.dummy import Pool as ThreadPool
+from functools import partial
+try:
+    import requests
+    import dns
+    import dns.resolver
+    from concurrent.futures import ThreadPoolExecutor
+    from requests_futures.sessions import FuturesSession
+    from concurrent.futures._base import TimeoutError
+except ImportError:
+    print("[!] Please pip install requirements.txt.")
+    sys.exit()
 
-def sha256(data):
-    digest = hashlib.new("sha256")
-    digest.update(data)
-    return digest.digest()
+LOGFILE = False
 
-def decrypt(enc_data, algorithm_dkey, mode):
-    decryptor = Cipher(algorithm_dkey, mode, default_backend()).decryptor()
-    return decryptor.update(enc_data) + decryptor.finalize()
+def init_logfile(logfile):
+    """
+    Initialize the global logfile if specified as a user-supplied argument
+    """
+    if logfile:
+        global LOGFILE
+        LOGFILE = logfile
 
-def decode_tag(data):
-    latitude = struct.unpack(">i", data[0:4])[0] / 10000000.0
-    longitude = struct.unpack(">i", data[4:8])[0] / 10000000.0
-    confidence = int.from_bytes(data[8:9], "big")
-    status = int.from_bytes(data[9:10], "big")
-    return {'lat': latitude, 'lon': longitude, 'conf': confidence, 'status': status}
+        now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        with open(logfile, 'a') as log_writer:
+            log_writer.write("\n\n#### CLOUD_ENUM {} ####\n"
+                             .format(now))
 
-def getAuth(regenerate=False, second_factor='sms'):
-    CONFIG_PATH = os.path.dirname(os.path.realpath(__file__)) + "/keys/auth.json"
-    if os.path.exists(CONFIG_PATH) and not regenerate:
-        with open(CONFIG_PATH, "r") as f:
-            j = json.load(f)
+def get_url_batch(url_list, use_ssl=False, callback='', threads=5, redir=True):
+    """
+    Processes a list of URLs, sending the results back to the calling
+    function in real-time via the `callback` parameter
+    """
+
+    # Start a counter for a status message
+    tick = {}
+    tick['total'] = len(url_list)
+    tick['current'] = 0
+
+    # Break the url list into smaller lists based on thread size
+    queue = [url_list[x:x+threads] for x in range(0, len(url_list), threads)]
+
+    # Define the protocol
+    if use_ssl:
+        proto = 'https://'
     else:
-        mobileme = icloud_login_mobileme(second_factor=second_factor)
-        j = {'dsid': mobileme['dsid'],
-             'searchPartyToken': mobileme['delegates']['com.apple.mobileme']['service-data']['tokens']['searchPartyToken']}
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(j, f)
-    return (j['dsid'], j['searchPartyToken'])
+        proto = 'http://'
 
-if __name__ == "__main__":
+    # Using the async requests-futures module, work in batches based on
+    # the 'queue' list created above. Call each URL, sending the results
+    # back to the callback function.
+    for batch in queue:
+        # I used to initialize the session object outside of this loop, BUT
+        # there were a lot of errors that looked related to pool cleanup not
+        # happening. Putting it in here fixes the issue.
+        # There is an unresolved discussion here:
+        # https://github.com/ross/requests-futures/issues/20
+        session = FuturesSession(executor=ThreadPoolExecutor(max_workers=threads+5))
+        batch_pending = {}
+        batch_results = {}
+
+        # First, grab the pending async request and store it in a dict
+        for url in batch:
+            batch_pending[url] = session.get(proto + url, allow_redirects=redir)
+
+        # Then, grab all the results from the queue.
+        # This is where we need to catch exceptions that occur with large
+        # fuzz lists and dodgy connections.
+        for url in batch_pending:
+            try:
+                # Timeout is set due to observation of some large jobs simply
+                # hanging forever with no exception raised.
+                batch_results[url] = batch_pending[url].result(timeout=30)
+            except requests.exceptions.ConnectionError as error_msg:
+                print("    [!] Connection error on {}:".format(url))
+                print(error_msg)
+            except TimeoutError:
+                print("    [!] Timeout on {}. Investigate if there are"
+                      " many of these".format(url))
+
+        # Now, send all the results to the callback function for analysis
+        # We need a way to stop processing unnecessary brute-forces, so the
+        # callback may tell us to bail out.
+        for url in batch_results:
+            check = callback(batch_results[url])
+            if check == 'breakout':
+                return
+
+        # Refresh a status message
+        tick['current'] += threads
+        sys.stdout.flush()
+        sys.stdout.write("    {}/{} complete..."
+                         .format(tick['current'], tick['total']))
+        sys.stdout.write('\r')
+
+    # Clear the status message
+    sys.stdout.write('                            \r')
+
+def dns_lookup(nameserver, name):
+    """
+    This function performs the actual DNS lookup when called in a threadpool
+    by the fast_dns_lookup function.
+    """
+    res = dns.resolver.Resolver()
+    res.timeout = 10
+    res.nameservers = [nameserver]
+
     try:
-        parser = argparse.ArgumentParser()
-        parser.add_argument('-H', '--hours', help='only show reports not older than these hours', type=int, default=24)
-        parser.add_argument('-p', '--prefix', help='only use keyfiles starting with this prefix', default='')
-        parser.add_argument('-r', '--regen', help='regenerate search-party-token', action='store_true')
-        parser.add_argument('-t', '--trusteddevice', help='use trusted device for 2FA instead of SMS', action='store_true')
-        args = parser.parse_args()
+        res.query(name)
+        # If no exception is thrown, return the valid name
+        return name
+    except dns.resolver.NXDOMAIN:
+        return ''
+    except dns.exception.Timeout:
+        print("    [!] DNS Timeout on {}. Investigate if there are many"
+              " of these.".format(name))
 
-        sq3db = sqlite3.connect(os.path.dirname(os.path.realpath(__file__)) + '/keys/reports.db')
-        sq3 = sq3db.cursor()
+def fast_dns_lookup(names, nameserver, callback='', threads=5):
+    """
+    Helper function to resolve DNS names. Uses multithreading.
+    """
+    total = len(names)
+    current = 0
+    valid_names = []
 
-        privkeys = {}
-        names = {}
-        for keyfile in glob.glob(os.path.dirname(os.path.realpath(__file__)) + '/keys/' + args.prefix + '*.keys'):
-            with open(keyfile) as f:
-                hashed_adv = priv = ''
-                name = os.path.basename(keyfile)[len(args.prefix):-5]
-                for line in f:
-                    key = line.rstrip('\n').split(': ')
-                    if key[0] == 'Private key':
-                        priv = key[1]
-                    elif key[0] == 'Hashed adv key':
-                        hashed_adv = key[1]
-                if priv and hashed_adv:
-                    privkeys[hashed_adv] = priv
-                    names[hashed_adv] = name
-                else:
-                    print(f"Couldn't find key pair in {keyfile}")
+    print("[*] Brute-forcing a list of {} possible DNS names".format(total))
 
-        unixEpoch = int(datetime.datetime.now().timestamp())
-        startdate = unixEpoch - (60 * 60 * args.hours)
-        data = {"search": [{"startDate": startdate * 1000, "endDate": unixEpoch * 1000, "ids": list(names.keys())}]}
+    # Break the url list into smaller lists based on thread size
+    queue = [names[x:x+threads] for x in range(0, len(names), threads)]
 
-        r = requests.post("https://gateway.icloud.com/acsnservice/fetch",
-                          auth=getAuth(regenerate=args.regen,
-                                       second_factor='trusted_device' if args.trusteddevice else 'sms'),
-                          headers=generate_anisette_headers(),
-                          json=data)
-        res = json.loads(r.content.decode())['results']
-        print(f'{r.status_code}: {len(res)} reports received.')
-        res = json.loads(r.content.decode())['results']
+    for batch in queue:
+        pool = ThreadPool(threads)
 
-        ordered = []
-        found = set()
-        sq3.execute('''CREATE TABLE IF NOT EXISTS reports (
-        id_short TEXT, timestamp INTEGER, datePublished INTEGER, payload TEXT, 
-        id TEXT, statusCode INTEGER, lat TEXT, lon TEXT, conf INTEGER
-, PRIMARY KEY(id_short,timestamp));''')
+        # Because pool.map takes only a single function arg, we need to
+        # define this partial so that each iteration uses the same ns
+        dns_lookup_params = partial(dns_lookup, nameserver)
 
-        for report in res:
-            priv = int.from_bytes(base64.b64decode(privkeys[report['id']]), byteorder='big')
-            data = base64.b64decode(report['payload'])
-            timestamp = int.from_bytes(data[0:4], 'big') + 978307200
+        results = pool.map(dns_lookup_params, batch)
 
-            if timestamp >= startdate:
-                # check if NULL bytes are present in the data
-                adj = len(data) - 88
+        # We should now have the batch of results back, process them.
+        for name in results:
+            if name:
+                if callback:
+                    callback(name)
+                valid_names.append(name)
 
-                # If so slice the data accordingly | Thanks, @c4pitalSteez!
-                eph_key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP224R1(), data[5+adj:62+adj])
-                shared_key = ec.derive_private_key(priv, ec.SECP224R1(), default_backend()).exchange(ec.ECDH(), eph_key)
-                symmetric_key = sha256(shared_key + b'\x00\x00\x00\x01' + data[5+adj:62+adj])
-                decryption_key = symmetric_key[:16]
-                iv = symmetric_key[16:]
-                enc_data = data[62+adj:72+adj]
-                auth_tag = data[72+adj:]
+        current += threads
 
-                decrypted = decrypt(enc_data, algorithms.AES(decryption_key), modes.GCM(iv, auth_tag))
-                tag = decode_tag(decrypted)
-                tag['timestamp'] = timestamp
-                tag['isodatetime'] = datetime.datetime.fromtimestamp(timestamp).isoformat()
-                tag['key'] = names[report['id']]
-                tag['goog'] = 'https://maps.google.com/maps?q=' + str(tag['lat']) + ',' + str(tag['lon'])
-                found.add(tag['key'])
-                ordered.append(tag)
+        # Update the status message
+        sys.stdout.flush()
+        sys.stdout.write("    {}/{} complete...".format(current, total))
+        sys.stdout.write('\r')
+        pool.close()
 
-                # SQL Injection Mitigation
-                query = "INSERT OR REPLACE INTO reports VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                parameters = (names[report['id']], timestamp, report['datePublished'], report['payload'], report['id'],
-                              report['statusCode'], str(tag['lat']), str(tag['lon']), tag['conf'])
-                sq3.execute(query, parameters)
+    # Clear the status message
+    sys.stdout.write('                            \r')
 
-        print(f'{len(ordered)} reports used.')
-        ordered.sort(key=lambda item: item.get('timestamp'))
-        for rep in ordered: 
-            print(rep)
-        print(f'found:   {list(found)}')
-        print(f'missing: {[key for key in names.values() if key not in found]}')
+    return valid_names
 
-        res = json.loads(r.content.decode())['results']
-        if r.status_code == 200 and len(res) == 0:
-            print()
-            print("No reports have been uploaded yet. Bring your Flipper to a more populated area and try again.")
-            print("For best results, lower the interval to 1 second and increase power to 6 dBm.")
-            print("This is not an error! Just be patient or check to make sure the correct .key file is being used.")
-            print()
-        else:
-            print("Reports have been successfully retrieved.")
-            # Exporting the processed data to a JSON file
-            with open("data.json", "w") as json_file:
-                json.dump(ordered, json_file, indent=4)
-            
-            print("Data has been successfully exported to 'data.json'.")
+def list_bucket_contents(bucket):
+    """
+    Provides a list of full URLs to each open bucket
+    """
+    key_regex = re.compile(r'<(?:Key|Name)>(.*?)</(?:Key|Name)>')
+    reply = requests.get(bucket)
 
-            result = subprocess.run(['python', script_name], capture_output=True, text=True)
-            if result.returncode == 0:
-                print("Script ran successfully!")
-                print("Output:", result.stdout)
-            else:
-                print("Script encountered an error.")
-                print("Error:", result.stderr)
-                
-        sq3db.commit()
-        sq3db.close()
-        
-    except Exception as e:
-        if str(e) == "AuthenticationError":
-            print("Authentication failed. Please check your Apple ID credentials.")
-        else:
-            print(e)
+    # Make a list of all the relative-path key name
+    keys = re.findall(key_regex, reply.text)
+
+    # Need to remove URL parameters before appending file names
+    # from Azure buckets
+    sub_regex = re.compile(r'(\?.*)')
+    bucket = sub_regex.sub('', bucket)
+
+    # Format them to full URLs and print to console
+    if keys:
+        printc("      FILES:\n", 'none')
+        for key in keys:
+            url = bucket + key
+            printc("      ->{}\n".format(url), 'none')
+    else:
+        printc("      ...empty bucket, so sad. :(\n", 'none')
+
+def printc(text, color):
+    """
+    Prints colored text to screen
+    """
+    # ANSI escape sequences
+    green = '\033[92m'
+    orange = '\033[33m'
+    red = '\033[31m'
+    bold = '\033[1m'
+    end = '\033[0m'
+
+    if color == 'orange':
+        sys.stdout.write(bold + orange + text + end)
+    if color == 'green':
+        sys.stdout.write(bold + green + text + end)
+    if color == 'red':
+        sys.stdout.write(bold + red + text + end)
+    if color == 'black':
+        sys.stdout.write(bold + text + end)
+    if color == 'none':
+        sys.stdout.write(text)
+
+    if LOGFILE:
+        with open(LOGFILE, 'a')  as log_writer:
+            log_writer.write(text.lstrip())
+
+def get_brute(brute_file, mini=1, maxi=63, banned='[^a-z0-9_-]'):
+    """
+    Generates a list of brute-force words based on length and allowed chars
+    """
+    # Read the brute force file into memory
+    with open(brute_file, encoding="utf8", errors="ignore") as infile:
+        names = infile.read().splitlines()
+
+    # Clean up the names to usable for containers
+    banned_chars = re.compile(banned)
+    clean_names = []
+    for name in names:
+        name = name.lower()
+        name = banned_chars.sub('', name)
+        if maxi >= len(name) >= mini:
+            if name not in clean_names:
+                clean_names.append(name)
+
+    return clean_names
+
+def start_timer():
+    """
+    Starts a timer for functions in main module
+    """
+    # Start a counter to report on elapsed time
+    start_time = time.time()
+    return start_time
+
+def stop_timer(start_time):
+    """
+    Stops timer and prints a status
+    """
+    # Stop the timer
+    elapsed_time = time.time() - start_time
+    formatted_time = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
+
+    # Print some statistics
+    print("")
+    print(" Elapsed time: {}".format(formatted_time))
+    print("")

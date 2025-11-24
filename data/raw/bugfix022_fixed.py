@@ -1,174 +1,202 @@
+from dataclasses import InitVar
+from typing import (
+    Type,
+    Any,
+    Optional,
+    Union,
+    Collection,
+    TypeVar,
+    Dict,
+    Callable,
+    Mapping,
+    List,
+    Tuple,
+    cast as typing_cast,
+)
 
-#!/usr/bin/env python
-
-from __future__ import (absolute_import, division, print_function)
-
-"""
-The vulnx main part.
-Author: anouarbensaad
-Desc  : CMS-Detector and Vulnerability Scanner & exploiter
-Copyright (c)
-See the file 'LICENSE' for copying permission
-"""
-
-from modules.detector import CMS
-from modules.dorks.engine import Dork
-from modules.dorks.helpers import DorkManual
-from modules.cli.cli import CLI
-from common.colors import red, green, bg, G, R, W, Y, G, good, bad, run, info, end, que, bannerblue2
-
-from common.requestUp import random_UserAgent
-from common.uriParser import parsing_url as hostd
-from common.banner import banner
-
-import sys
-import argparse
-import re
-import os
-import socket
-import common
-import warnings
-import signal
-import requests
-
-HEADERS = {
-    'User-Agent': random_UserAgent(),
-    'Content-type' : '*/*',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Connection': 'keep-alive',
-}
-
-warnings.filterwarnings(
-    action="ignore", message=".*was already imported", category=UserWarning)
-warnings.filterwarnings(action="ignore", category=DeprecationWarning)
-
-# cleaning screen
-
-banner()
-
-def parser_error(errmsg):
-    print("Usage: python " + sys.argv[0] + " [Options] use -h for help")
-    print(R + "Error: " + errmsg + W)
-    sys.exit()
+T = TypeVar("T", bound=Any)
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        epilog='\tExample: \r\npython ' + sys.argv[0] + " -u google.com")
-    parser.error = parser_error
-    parser._optionals.title = "\nOPTIONS"
-    parser.add_argument('-u', '--url', help="url target to scan")
-    parser.add_argument(
-        '-D', '--dorks', help='search webs with dorks', dest='dorks', type=str)
-    parser.add_argument(
-        '-o', '--output', help='specify output directory', required=False)
-    parser.add_argument('-n', '--number-pages',
-                        help='search dorks number page limit', dest='numberpage', type=int)
-    parser.add_argument('-i', '--input', help='specify input file of domains to scan', dest='input_file', required=False)
-    parser.add_argument('-l', '--dork-list', help='list names of dorks exploits', dest='dorkslist',
-                        choices=['wordpress', 'prestashop', 'joomla', 'lokomedia', 'drupal', 'all'])
-    parser.add_argument('-p',  '--ports', help='ports to scan',
-                        dest='scanports', type=int)
-    # Switches
-    parser.add_argument('-e', '--exploit', help='searching vulnerability & run exploits',
-                        dest='exploit', action='store_true')
-    parser.add_argument('--it', help='interactive mode.',
-                        dest='cli', action='store_true')
-
-    parser.add_argument('--cms', help='search cms info[themes,plugins,user,version..]',
-                        dest='cms', action='store_true')
-
-    parser.add_argument('-w', '--web-info', help='web informations gathering',
-                        dest='webinfo', action='store_true')
-    parser.add_argument('-d', '--domain-info', help='subdomains informations gathering',
-                        dest='subdomains', action='store_true')
-    parser.add_argument('--dns', help='dns informations gatherings',
-                        dest='dnsdump', action='store_true')
-
-    return parser.parse_args()
-
-# args declaration
-args = parse_args()
-# url arg
-url = args.url
-# input_file
-input_file = args.input_file
-# Disable SSL related warnings
-warnings.filterwarnings('ignore')
-
-def detection():
-
-    instance = CMS(
-        url,
-        headers=HEADERS,
-        exploit=args.exploit,
-        domain=args.subdomains,
-        webinfo=args.webinfo,
-        serveros=True,
-        cmsinfo=args.cms,
-        dnsdump=args.dnsdump,
-        port=args.scanports
+def transform_value(
+    type_hooks: Dict[Type, Callable[[Any], Any]], cast: List[Type], target_type: Type, value: Any
+) -> Any:
+    if is_init_var(target_type):
+        target_type = extract_init_var(target_type)
+    if target_type in type_hooks:
+        value = type_hooks[target_type](value)
+    else:
+        for cast_type in cast:
+            if is_subclass(target_type, cast_type):
+                if is_generic_collection(target_type):
+                    value = extract_origin_collection(target_type)(value)
+                else:
+                    value = target_type(value)
+                break
+    if is_optional(target_type):
+        if value is None:
+            return None
+        target_type = extract_optional(target_type)
+        return transform_value(type_hooks, cast, target_type, value)
+    if is_generic_collection(target_type) and isinstance(value, extract_origin_collection(target_type)):
+        collection_cls = value.__class__
+        if issubclass(collection_cls, dict):
+            key_cls, item_cls = extract_generic(target_type, defaults=(Any, Any))
+            return collection_cls(
+                {
+                    transform_value(type_hooks, cast, key_cls, key): transform_value(type_hooks, cast, item_cls, item)
+                    for key, item in value.items()
+                }
             )
-    instance.instanciate()
+        item_cls = extract_generic(target_type, defaults=(Any,))[0]
+        return collection_cls(transform_value(type_hooks, cast, item_cls, item) for item in value)
+    return value
 
-def dork_engine():
-    if args.dorks:
-        DEngine = Dork(
-            exploit=args.dorks,
-            headers=HEADERS,
-            pages=(args.numberpage or 1)
-            )
-        DEngine.search()
 
-def dorks_manual():
-    if args.dorkslist:
-        DManual = DorkManual(
-            select=args.dorkslist
-            )
-        DManual.list()
+def extract_origin_collection(collection: Type) -> Type:
+    try:
+        return collection.__extra__
+    except AttributeError:
+        return collection.__origin__
 
-def interactive_cli():
-    if args.cli:
-        cli = CLI(headers=HEADERS)
-        cli.general("")
 
-def signal_handler(signal, frame):
-    print("%s(ID: {}) Cleaning up...\n Exiting...".format(signal) % (W))
-    exit(0)
+def is_optional(type_: Type) -> bool:
+    return is_union(type_) and type(None) in extract_generic(type_)
 
-signal.signal(signal.SIGINT, signal_handler)
 
-if __name__ == "__main__":
+def extract_optional(optional: Type[Optional[T]]) -> T:
+    other_members = [member for member in extract_generic(optional) if member is not type(None)]
+    if other_members:
+        return typing_cast(T, Union[tuple(other_members)])
+    else:
+        raise ValueError("can not find not-none value")
 
-    dork_engine()
-    dorks_manual()
-    interactive_cli()
-    
-    if url:
-        root = url
-        if root.startswith('http://'):
-            url = root
-        elif root.startswith('https://'):
-            url = root
-            # url=root.replace('https://','http://')
-        else:
-            url = 'https://'+root
-            print(url)
-        detection()
 
-    if input_file:
-        with open(input_file,'r') as urls:
-            u_array = [url.strip('\n') for url in urls]
-            try:
-                for url in u_array:
-                    root = url
-                #url condition entrypoint
-                    if root.startswith('http'):
-                        url = root
-                    else:
-                        url = 'https://'+root
-                    detection()
-                    urls.close()
-            except Exception as error:
-                print('error : '+error)
+def is_generic(type_: Type) -> bool:
+    return hasattr(type_, "__origin__")
+
+
+def is_union(type_: Type) -> bool:
+    if is_generic(type_) and type_.__origin__ == Union:
+        return True
+
+    try:
+        from types import UnionType  # type: ignore
+
+        return isinstance(type_, UnionType)
+    except ImportError:
+        return False
+
+
+def is_tuple(type_: Type) -> bool:
+    return is_subclass(type_, tuple)
+
+
+def is_literal(type_: Type) -> bool:
+    try:
+        from typing import Literal  # type: ignore
+
+        return is_generic(type_) and type_.__origin__ == Literal
+    except ImportError:
+        return False
+
+
+def is_new_type(type_: Type) -> bool:
+    return hasattr(type_, "__supertype__")
+
+
+def extract_new_type(type_: Type) -> Type:
+    return type_.__supertype__
+
+
+def is_init_var(type_: Type) -> bool:
+    return isinstance(type_, InitVar) or type_ is InitVar
+
+
+def extract_init_var(type_: Type) -> Union[Type, Any]:
+    try:
+        return type_.type
+    except AttributeError:
+        return Any
+
+
+def is_instance(value: Any, type_: Type) -> bool:
+    if type_ == Any:
+        return True
+    elif is_union(type_):
+        return any(is_instance(value, t) for t in extract_generic(type_))
+    elif is_generic_collection(type_):
+        origin = extract_origin_collection(type_)
+        if not isinstance(value, origin):
+            return False
+        if not extract_generic(type_):
+            return True
+        if isinstance(value, tuple) and is_tuple(type_):
+            tuple_types = extract_generic(type_)
+            if len(tuple_types) == 1 and tuple_types[0] == ():
+                return len(value) == 0
+            elif len(tuple_types) == 2 and tuple_types[1] is ...:
+                return all(is_instance(item, tuple_types[0]) for item in value)
+            else:
+                if len(tuple_types) != len(value):
+                    return False
+                return all(is_instance(item, item_type) for item, item_type in zip(value, tuple_types))
+        if isinstance(value, Mapping):
+            key_type, val_type = extract_generic(type_, defaults=(Any, Any))
+            for key, val in value.items():
+                if not is_instance(key, key_type) or not is_instance(val, val_type):
+                    return False
+            return True
+        return all(is_instance(item, extract_generic(type_, defaults=(Any,))[0]) for item in value)
+    elif is_new_type(type_):
+        return is_instance(value, extract_new_type(type_))
+    elif is_literal(type_):
+        return value in extract_generic(type_)
+    elif is_init_var(type_):
+        return is_instance(value, extract_init_var(type_))
+    elif is_type_generic(type_):
+        return is_subclass(value, extract_generic(type_)[0])
+    else:
+        try:
+            # As described in PEP 484 - section: "The numeric tower"
+            if isinstance(value, (int, float)) and type_ in [float, complex]:
+                return True
+            return isinstance(value, type_)
+        except TypeError:
+            return False
+
+
+def is_generic_collection(type_: Type) -> bool:
+    if not is_generic(type_):
+        return False
+    origin = extract_origin_collection(type_)
+    try:
+        return bool(origin and issubclass(origin, Collection))
+    except (TypeError, AttributeError):
+        return False
+
+
+def extract_generic(type_: Type, defaults: Tuple = ()) -> tuple:
+    try:
+        if getattr(type_, "_special", False):
+            return defaults
+        if type_.__args__ == ():
+            return (type_.__args__,)
+        return type_.__args__ or defaults  # type: ignore
+    except AttributeError:
+        return defaults
+
+
+def is_subclass(sub_type: Type, base_type: Type) -> bool:
+    if is_generic_collection(sub_type):
+        sub_type = extract_origin_collection(sub_type)
+    try:
+        return issubclass(sub_type, base_type)
+    except TypeError:
+        return False
+
+
+def is_type_generic(type_: Type) -> bool:
+    try:
+        return type_.__origin__ in (type, Type)
+    except AttributeError:
+        return False

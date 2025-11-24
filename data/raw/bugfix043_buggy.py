@@ -1,167 +1,83 @@
-#!/usr/bin/env python3
-import argparse
-import base64
-import datetime
-import glob
-import hashlib
-import json
-import os
-import sqlite3
-import struct
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# project = https://github.com/Xyntax/POC-T
+# author = i@cdxy.me
 
-import requests
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+"""
+Functions to get user-agent string
+edit by cdxy [i@cdxy.me]
+May 9 Mon, 2016
 
-from cores.pypush_gsa_icloud import icloud_login_mobileme, generate_anisette_headers
+usage:
+from lib.util.useragent import *
+str1 = get_random_agent()
+str2 = firefox()
+str3 = iphone()
+str4 = google_bot()
+...
 
+tips:
+init_UAlist(),get_random_agent()
+these 2 methods should be called after [path-init-method] in lib.core.common
+"""
 
-def sha256(data):
-    digest = hashlib.new("sha256")
-    digest.update(data)
-    return digest.digest()
-
-
-def decrypt(enc_data, algorithm_dkey, mode):
-    decryptor = Cipher(algorithm_dkey, mode, default_backend()).decryptor()
-    return decryptor.update(enc_data) + decryptor.finalize()
+import random
+from lib.core.data import conf, th, paths, logger
+from lib.core.common import getFileItems
 
 
-def decode_tag(data):
-    latitude = struct.unpack(">i", data[0:4])[0] / 10000000.0
-    longitude = struct.unpack(">i", data[4:8])[0] / 10000000.0
-    confidence = int.from_bytes(data[8:9])
-    status = int.from_bytes(data[9:10])
-    return {'lat': latitude, 'lon': longitude, 'conf': confidence, 'status': status}
+def _init_UAlist(path):
+    infoMsg = "loading HTTP User-Agent header(s) from "
+    infoMsg += "file '%s'" % path
+    logger.info(infoMsg)
+
+    # TODO 此处 conf.RANDOM_UA 在其他地方暂时没有用到
+    conf.RANDOM_UA = True
+    th.UA_LIST = getFileItems(path)
+
+    successMsg = "Total: %d" % len(th.UA_LIST)
+    logger.info(successMsg)
 
 
-def getAuth(regenerate=False, second_factor='sms'):
-    CONFIG_PATH = os.path.dirname(os.path.realpath(__file__)) + "/keys/auth.json"
-    if os.path.exists(CONFIG_PATH) and not regenerate:
-        with open(CONFIG_PATH, "r") as f:
-            j = json.load(f)
-    else:
-        mobileme = icloud_login_mobileme(second_factor=second_factor)
-        j = {'dsid': mobileme['dsid'],
-             'searchPartyToken': mobileme['delegates']['com.apple.mobileme']['service-data']['tokens'][
-                 'searchPartyToken']}
-        with open(CONFIG_PATH, "w") as f:
-            json.dump(j, f)
-    return (j['dsid'], j['searchPartyToken'])
-
-
-if __name__ == "__main__":
+def get_random_agent(path=paths.UA_LIST_PATH):
+    if not th.has_key("UA_LIST"):
+        _init_UAlist(path)
     try:
+        return random.sample(th.UA_LIST, 1)[0]
+    except IOError, e:
+        warnMsg = "unable to read HTTP User-Agent header "
+        warnMsg += "file '%s'" % path
+        logger.warning(warnMsg)
+        return
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument('-H', '--hours', help='only show reports not older than these hours', type=int, default=24)
-        parser.add_argument('-p', '--prefix', help='only use keyfiles starting with this prefix', default='')
-        parser.add_argument('-r', '--regen', help='regenerate search-party-token', action='store_true')
-        parser.add_argument('-t', '--trusteddevice', help='use trusted device for 2FA instead of SMS',
-                            action='store_true')
-        args = parser.parse_args()
 
-        sq3db = sqlite3.connect(os.path.dirname(os.path.realpath(__file__)) + '/keys/reports.db')
-        sq3 = sq3db.cursor()
+def firefox():
+    return 'Mozilla/5.0 (Windows NT 5.1; rv:5.0) Gecko/20100101 Firefox/5.0'
 
-        privkeys = {}
-        names = {}
-        for keyfile in glob.glob(os.path.dirname(os.path.realpath(__file__)) + '/keys/' + args.prefix + '*.keys'):
-            # read key files generated with generate_keys.py
-            with open(keyfile) as f:
-                hashed_adv = priv = ''
-                name = os.path.basename(keyfile)[len(args.prefix):-5]
-                for line in f:
-                    key = line.rstrip('\n').split(': ')
-                    if key[0] == 'Private key':
-                        priv = key[1]
-                    elif key[0] == 'Hashed adv key':
-                        hashed_adv = key[1]
 
-                if priv and hashed_adv:
-                    privkeys[hashed_adv] = priv
-                    names[hashed_adv] = name
-                else:
-                    print(f"Couldn't find key pair in {keyfile}")
+def ie():
+    return 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0; SLCC2; .NET CLR 2.0.50727; .NET CLR 3.5.30729; .NET CLR 3.0.30729; Media Center PC 6.0; .NET4.0C; .NET4.0E)'
 
-        unixEpoch = int(datetime.datetime.now().timestamp())
-        startdate = unixEpoch - (60 * 60 * args.hours)
-        data = {"search": [{"startDate": startdate * 1000, "endDate": unixEpoch * 1000, "ids": list(names.keys())}]}
 
-        r = requests.post("https://gateway.icloud.com/acsnservice/fetch",
-                          auth=getAuth(regenerate=args.regen,
-                                       second_factor='trusted_device' if args.trusteddevice else 'sms'),
-                          headers=generate_anisette_headers(),
-                          json=data)
-        res = json.loads(r.content.decode())['results']
-        print(f'{r.status_code}: {len(res)} reports received.')
+def chrome():
+    return 'Mozilla/5.0 (Windows NT 5.2) AppleWebKit/534.30 (KHTML, like Gecko) Chrome/12.0.742.122 Safari/534.30'
 
-        ordered = []
-        found = set()
 
-        # SQL query to create a table named 'report' if it does not exist
-        create_table_query = '''CREATE TABLE IF NOT EXISTS reports (
-        id_short TEXT, timestamp INTEGER, datePublished INTEGER, payload TEXT, 
-        id TEXT, statusCode INTEGER, lat TEXT, lon TEXT, conf INTEGER, PRIMARY KEY(id_short,timestamp));'''
+def opera():
+    return 'Opera/9.80 (Windows NT 5.1; U; zh-cn) Presto/2.9.168 Version/11.50'
 
-        # Execute the SQL query
-        sq3.execute(create_table_query)
 
-        for report in res:
-            priv = int.from_bytes(base64.b64decode(privkeys[report['id']]), byteorder='big')
-            data = base64.b64decode(report['payload'])
-            # the following is all copied from https://github.com/hatomist/openhaystack-python, thanks @hatomist!
-            timestamp = int.from_bytes(data[0:4], 'big') + 978307200
+def iphone():
+    return 'Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_0 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7A341 Safari/528.16'
 
-            if timestamp >= startdate:
-                # check if NULL bytes are present in the data
-                adj = len(data) - 88
 
-                # If so slice the data accordingly | Thanks, @c4pitalSteez!
-                eph_key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP224R1(), data[5+adj:62+adj])
-                shared_key = ec.derive_private_key(priv, ec.SECP224R1(), default_backend()).exchange(ec.ECDH(), eph_key)
-                symmetric_key = sha256(shared_key + b'\x00\x00\x00\x01' + data[5+adj:62+adj])
-                decryption_key = symmetric_key[:16]
-                iv = symmetric_key[16:]
-                enc_data = data[62+adj:72+adj]
-                auth_tag = data[72+adj:]
+def google_bot():
+    return 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
 
-                decrypted = decrypt(enc_data, algorithms.AES(decryption_key), modes.GCM(iv, auth_tag))
-                tag = decode_tag(decrypted)
-                tag['timestamp'] = timestamp
-                tag['isodatetime'] = datetime.datetime.fromtimestamp(timestamp).isoformat()
-                tag['key'] = names[report['id']]
-                tag['goog'] = 'https://maps.google.com/maps?q=' + str(tag['lat']) + ',' + str(tag['lon'])
-                found.add(tag['key'])
-                ordered.append(tag)
 
-                # SQL Injection Mitigation
-                query = "INSERT OR REPLACE INTO reports VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                parameters = (names[report['id']], timestamp, report['datePublished'], report['payload'], report['id'],
-                              report['statusCode'], str(tag['lat']), str(tag['lon']), tag['conf'])
-                sq3.execute(query, parameters)
+def msn_bot():
+    return 'msnbot/1.1 (+http://search.msn.com/msnbot.htm)'
 
-        print(f'{len(ordered)} reports used.')
-        ordered.sort(key=lambda item: item.get('timestamp'))
-        for rep in ordered: print(rep)
-        print(f'found:   {list(found)}')
-        print(f'missing: {[key for key in names.values() if key not in found]}')
-        
-        res = json.loads(r.content.decode())['results']
-        if r.status_code == 200 and len(res) == 0:
-            print()
-            print("No reports have been uploaded yet. Bring your Flipper to a more populated area and try again.")
-            print("For best results, lower the interval to 1 second and increase power to 6 dBm.")
-            print("This is not an error! Just be patient or check to make sure the correct .key file is being used.")
-            print()
-                          
-        sq3.close()
-        sq3db.commit()
-        sq3db.close()
 
-    except Exception as e:
-        if e == "AuthenticationError":
-            print("Authentication failed. Please check your Apple ID credentials.")
-        else:
-            print(e)
+def yahoo_bot():
+    return 'Mozilla/5.0 (compatible; Yahoo! Slurp; http://help.yahoo.com/help/us/ysearch/slurp)'

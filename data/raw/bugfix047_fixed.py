@@ -1,65 +1,144 @@
-from zstandard import ZstdDecompressor
+import time
+import sys
+import logging
+import numpy as np
 
-class BlockDecompressorReader:
-	#Position in decompressed data
-	Position = 0
-	BlockHeader = None
-	CurrentBlock = b""
-	CurrentBlockId = -1
 
-	def __init__(self, nspf, BlockHeader):
-		self.BlockHeader = BlockHeader
-		initialOffset = nspf.tell()
-		self.nspf = nspf
-		if BlockHeader.blockSizeExponent < 14 or BlockHeader.blockSizeExponent > 32:
-			raise ValueError("Corrupted NCZBLOCK header: Block size must be between 14 and 32")
-		self.BlockSize = 2**BlockHeader.blockSizeExponent
-		self.CompressedBlockOffsetList = [initialOffset]
+def print_sentence(logger, data):
+    """
+    Adapted from Assignment 3 of CS224N
 
-		for compressedBlockSize in BlockHeader.compressedBlockSizeList[:-1]:
-			self.CompressedBlockOffsetList.append(self.CompressedBlockOffsetList[-1] + compressedBlockSize)
+    Args:
+        logger: logger instance
+        data: dict d["x"] = ["I", "live", ...]
+    """
+    spacings = [max([len(seq[i]) for seq in data.values()]) for i in range(len(data[list(data.keys())[0]]))]
+    # Compute the word spacing
+    for key, seq in data.items():
+        # logger.info("{} : ".format(key))
+        to_print = ""
+        for token, spacing in zip(seq, spacings):
+            to_print += token + " " * (spacing - len(token) + 1)
+        logger.info(to_print)
 
-		self.CompressedBlockSizeList = BlockHeader.compressedBlockSizeList
 
-	def __decompressBlock(self, blockID):
-		if self.CurrentBlockId == blockID:
-			return self.CurrentBlock
-		decompressedBlockSize = self.BlockSize
-		if blockID >= len(self.CompressedBlockOffsetList) - 1:
-			if blockID >= len(self.CompressedBlockOffsetList):
-				raise EOFError("BlockID exceeds the amounts of compressed blocks in that file!")
-			decompressedBlockSize = self.BlockHeader.decompressedSize % self.BlockSize
-		self.nspf.seek(self.CompressedBlockOffsetList[blockID])
-		if self.CompressedBlockSizeList[blockID] < decompressedBlockSize:
-			self.CurrentBlock = ZstdDecompressor().decompress(self.nspf.read(self.CompressedBlockSizeList[blockID]))
-		else:
-			self.CurrentBlock = self.nspf.read(decompressedBlockSize)
-		self.CurrentBlockId = blockID
-		return self.CurrentBlock
+def get_logger(filename):
+    logger = logging.getLogger('logger')
+    logger.setLevel(logging.DEBUG)
+    logging.basicConfig(format='%(message)s', level=logging.DEBUG)
+    handler = logging.FileHandler(filename)
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s: %(message)s'))
+    logging.getLogger().addHandler(handler)
+    return logger
 
-	def seek(self, offset, whence = 0):
-		if whence == 0:
-			self.Position = offset
-		elif whence == 1:
-			self.Position += offset
-		elif whence == 2:
-			self.Position = self.BlockHeader.decompressedSize + offset
-		else:
-			raise ValueError("whence argument must be 0, 1 or 2")
 
-	def read(self, length):
-		buffer = b""
-		blockOffset = self.Position%self.BlockSize
-		blockID = self.Position//self.BlockSize
+class Progbar(object):
+    """Progbar class copied from keras (https://github.com/fchollet/keras/)
+    
+    Displays a progress bar.
+    Small edit : added strict arg to update
+    # Arguments
+        target: Total number of steps expected.
+        interval: Minimum visual progress update interval (in seconds).
+    """
 
-		while(len(buffer) - blockOffset < length):
-			if blockID >= len(self.CompressedBlockOffsetList):
-				break
+    def __init__(self, target, width=30, verbose=1):
+        self.width = width
+        self.target = target
+        self.sum_values = {}
+        self.unique_values = []
+        self.start = time.time()
+        self.total_width = 0
+        self.seen_so_far = 0
+        self.verbose = verbose
 
-			buffer += self.__decompressBlock(blockID)
-			blockID += 1
+    def update(self, current, values=[], exact=[], strict=[]):
+        """
+        Updates the progress bar.
+        # Arguments
+            current: Index of current step.
+            values: List of tuples (name, value_for_last_step).
+                The progress bar will display averages for these values.
+            exact: List of tuples (name, value_for_last_step).
+                The progress bar will display these values directly.
+        """
 
-		buffer = buffer[blockOffset:blockOffset+length]
-		self.Position += length
+        for k, v in values:
+            if k not in self.sum_values:
+                self.sum_values[k] = [v * (current - self.seen_so_far), current - self.seen_so_far]
+                self.unique_values.append(k)
+            else:
+                self.sum_values[k][0] += v * (current - self.seen_so_far)
+                self.sum_values[k][1] += (current - self.seen_so_far)
+        for k, v in exact:
+            if k not in self.sum_values:
+                self.unique_values.append(k)
+            self.sum_values[k] = [v, 1]
 
-		return buffer
+        for k, v in strict:
+            if k not in self.sum_values:
+                self.unique_values.append(k)
+            self.sum_values[k] = v
+
+        self.seen_so_far = current
+
+        now = time.time()
+        if self.verbose == 1:
+            prev_total_width = self.total_width
+            sys.stdout.write("\b" * prev_total_width)
+            sys.stdout.write("\r")
+
+            numdigits = int(np.floor(np.log10(self.target))) + 1
+            barstr = '%%%dd/%%%dd [' % (numdigits, numdigits)
+            bar = barstr % (current, self.target)
+            prog = float(current)/self.target
+            prog_width = int(self.width*prog)
+            if prog_width > 0:
+                bar += ('='*(prog_width-1))
+                if current < self.target:
+                    bar += '>'
+                else:
+                    bar += '='
+            bar += ('.'*(self.width-prog_width))
+            bar += ']'
+            sys.stdout.write(bar)
+            self.total_width = len(bar)
+
+            if current:
+                time_per_unit = (now - self.start) / current
+            else:
+                time_per_unit = 0
+            eta = time_per_unit*(self.target - current)
+            info = ''
+            if current < self.target:
+                info += ' - ETA: %ds' % eta
+            else:
+                info += ' - %ds' % (now - self.start)
+            for k in self.unique_values:
+                if type(self.sum_values[k]) is list:
+                    info += ' - %s: %.4f' % (k, self.sum_values[k][0] / max(1, self.sum_values[k][1]))
+                else:
+                    info += ' - %s: %s' % (k, self.sum_values[k])
+
+            self.total_width += len(info)
+            if prev_total_width > self.total_width:
+                info += ((prev_total_width-self.total_width) * " ")
+
+            sys.stdout.write(info)
+            sys.stdout.flush()
+
+            if current >= self.target:
+                sys.stdout.write("\n")
+
+        if self.verbose == 2:
+            if current >= self.target:
+                info = '%ds' % (now - self.start)
+                for k in self.unique_values:
+                    info += ' - %s: %.4f' % (k, self.sum_values[k][0] / max(1, self.sum_values[k][1]))
+                sys.stdout.write(info + "\n")
+
+    def add(self, n, values=[]):
+        self.update(self.seen_so_far+n, values)
+
+

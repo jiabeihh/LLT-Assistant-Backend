@@ -1,111 +1,62 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-from absl import app
-from absl import flags
-from absl import logging
-from pathlib import Path
-from tensorflow import keras
-import numpy as np
+#!/bin/env python
+# 
+# Copyright 2010 bit.ly
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may
+# not use this file except in compliance with the License. You may obtain
+# a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations
+# under the License.
+
+"""
+Calculate the 95% time from a list of times given on stdin
+
+http://github.com/bitly/data_hacks
+"""
+
+import sys
 import os
-import json
-from os import listdir
-from os.path import isfile, join
-import tensorflow as tf
+from decimal import Decimal
 
-flags.DEFINE_string(
-		"image_dir", None,
-		"A directory of images to classify.")
-flags.DEFINE_string(
-		"saved_model_path",
-		None,
-		"The model to load.")
-flags.DEFINE_integer(
-    "image_dim",
-    224,
-    "The square dimension of the model's input shape."
-    )
-
-FLAGS = flags.FLAGS
-
-def load_images(image_paths, image_size):
-    '''
-    Function for loading images into numpy arrays for passing to model.predict
-    inputs:
-        image_paths: list of image paths to load
-        image_size: size into which images should be resized
-    
-    outputs:
-        loaded_images: loaded images on which keras model can run predictions
-        loaded_image_indexes: paths of images which the function is able to process
-    
-    '''
-    loaded_images = []
-    loaded_image_paths = []
-
-    if os.path.isdir(image_paths):
-        print('wut')
-        parent = image_paths
-        image_paths = [join(parent, f) for f in listdir(image_paths) if isfile(join(parent, f))]
-    else:
-        print('wut1')
-        image_paths = [image_paths]
-
-    for i, img_path in enumerate(image_paths):
+def run():
+    count = 0
+    data = {}
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        line = line.strip()
+        if not line:
+            # skip empty lines (ie: newlines)
+            continue
         try:
-            print(img_path)
-            image = keras.preprocessing.image.load_img(img_path, target_size = image_size)
-            image = keras.preprocessing.image.img_to_array(image)
-            image /= 255
-            loaded_images.append(image)
-            loaded_image_paths.append(img_path)
-        except Exception as ex:
-            print(i, img_path, ex)
-    
-    return np.asarray(loaded_images), loaded_image_paths
-
-def main(args):
-    del args
-    
-    if FLAGS.image_dir is None or not os.path.exists(FLAGS.image_dir):
-    	raise ValueError("image_dir must be a valid directory with images to classify.")
-    
-    if FLAGS.saved_model_path is None or not os.path.exists(FLAGS.image_dir):
-    	raise ValueError("saved_model_path must be the valid directory of a saved model to load.")
-    
-    model = tf.keras.models.load_model(FLAGS.saved_model_path)
-    
-    images, image_paths = load_images(FLAGS.image_dir, (FLAGS.image_dim, FLAGS.image_dim))
-    
-    model_preds = model.predict(images)
-    
-    preds = np.argsort(model_preds, axis = 1).tolist()
-    
-    probs = []
-
-    categories = ['drawings', 'hentai', 'neutral', 'porn', 'sexy']
-
-    for i, single_preds in enumerate(preds):
-        single_probs = []
-        for j, pred in enumerate(single_preds):
-            single_probs.append(model_preds[i][pred])
-            preds[i][j] = categories[pred]
+            t = Decimal(line)
+        except:
+            print >>sys.stderr, "invalid line %r" % line
+        count +=1
+        data[t] = data.get(t, 0) + 1
+    print calc_95(data, count)
         
-        probs.append(single_probs)
-    
-    
-    images_preds = {}
-    
-    for i, loaded_image_path in enumerate(image_paths):
-        images_preds[loaded_image_path] = {}
-        for _ in range(len(preds[i])):
-            images_preds[loaded_image_path][preds[i][_]] = str(probs[i][_])
-    
-    print(json.dumps(images_preds, sort_keys=True, indent=2), '\n')
-
-def run_main():
-	app.run(main)
+def calc_95(data, count):
+    # find the time it took for x entry, where x is the threshold
+    threshold = Decimal(count) * Decimal('.95')
+    start = Decimal(0)
+    times = data.keys()
+    times.sort()
+    for t in times:
+        # increment our count by the # of items in this time bucket
+        start += data[t]
+        if start > threshold:
+            return t
 
 if __name__ == "__main__":
-	run_main()
+    if sys.stdin.isatty():
+        print "Usage: cat data | %(prog)s" % os.path.basename(sys.argv[0])
+        sys.exit(1)
+    run()

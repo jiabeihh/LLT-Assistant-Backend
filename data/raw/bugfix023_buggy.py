@@ -1,155 +1,171 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
 
-#!/usr/bin/env python
+import kiui
+from kiui.lpips import LPIPS
 
-from __future__ import (absolute_import, division, print_function)
-
-"""
-The vulnx main part.
-Author: anouarbensaad
-Desc  : CMS-Detector and Vulnerability Scanner & exploiter
-Copyright (c)
-See the file 'LICENSE' for copying permission
-"""
-
-from modules.detector import CMS
-from modules.dorks.engine import Dork
-from modules.dorks.helpers import DorkManual
-from modules.cli.cli import CLI
-from common.colors import red, green, bg, G, R, W, Y, G, good, bad, run, info, end, que, bannerblue2
-
-from common.requestUp import random_UserAgent
-from common.uriParser import parsing_url as hostd
-from common.banner import banner
-
-import sys
-import argparse
-import re
-import os
-import socket
-import common
-import warnings
-import signal
-import requests
+from core.unet import UNet
+from core.options import Options
+from core.gs import GaussianRenderer
 
 
-warnings.filterwarnings(
-    action="ignore", message=".*was already imported", category=UserWarning)
-warnings.filterwarnings(action="ignore", category=DeprecationWarning)
+class LGM(nn.Module):
+    def __init__(
+        self,
+        opt: Options,
+    ):
+        super().__init__()
 
-# cleaning screen
+        self.opt = opt
 
-banner()
+        # unet
+        self.unet = UNet(
+            9, 14, 
+            down_channels=self.opt.down_channels,
+            down_attention=self.opt.down_attention,
+            mid_attention=self.opt.mid_attention,
+            up_channels=self.opt.up_channels,
+            up_attention=self.opt.up_attention,
+        )
 
-def parser_error(errmsg):
-    print("Usage: python " + sys.argv[0] + " [Options] use -h for help")
-    print(R + "Error: " + errmsg + W)
-    sys.exit()
+        # last conv
+        self.conv = nn.Conv2d(14, 14, kernel_size=1) # NOTE: maybe remove it if train again
+
+        # Gaussian Renderer
+        self.gs = GaussianRenderer(opt)
+
+        # activations...
+        self.pos_act = lambda x: x.clamp(-1, 1)
+        self.scale_act = lambda x: 0.1 * F.softplus(x)
+        self.opacity_act = lambda x: torch.sigmoid(x)
+        self.rot_act = F.normalize
+        self.rgb_act = lambda x: 0.5 * torch.tanh(x) + 0.5 # NOTE: may use sigmoid if train again
+
+        # LPIPS loss
+        if self.opt.lambda_lpips > 0:
+            self.lpips_loss = LPIPS(net='vgg')
+            self.lpips_loss.requires_grad_(False)
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        epilog='\tExample: \r\npython ' + sys.argv[0] + " -u google.com")
-    parser.error = parser_error
-    parser._optionals.title = "\nOPTIONS"
-    parser.add_argument('-u', '--url', help="url target to scan")
-    parser.add_argument(
-        '-D', '--dorks', help='search webs with dorks', dest='dorks', type=str)
-    parser.add_argument(
-        '-o', '--output', help='specify output directory', required=False)
-    parser.add_argument('-n', '--number-pages',
-                        help='search dorks number page limit', dest='numberpage', type=int)
-    parser.add_argument('-i', '--input', help='specify input file of domains to scan', dest='input_file', required=False)
-    parser.add_argument('-l', '--dork-list', help='list names of dorks exploits', dest='dorkslist',
-                        choices=['wordpress', 'prestashop', 'joomla', 'lokomedia', 'drupal', 'all'])
-    parser.add_argument('-p',  '--ports', help='ports to scan',
-                        dest='scanports', type=int)
-    # Switches
-    parser.add_argument('-e', '--exploit', help='searching vulnerability & run exploits',
-                        dest='exploit', action='store_true')
-    parser.add_argument('--it', help='interactive mode.',
-                        dest='cli', action='store_true')
+    def state_dict(self, **kwargs):
+        # remove lpips_loss
+        state_dict = super().state_dict(**kwargs)
+        for k in list(state_dict.keys()):
+            if 'lpips_loss' in k:
+                del state_dict[k]
+        return state_dict
 
-    parser.add_argument('--cms', help='search cms info[themes,plugins,user,version..]',
-                        dest='cms', action='store_true')
 
-    parser.add_argument('-w', '--web-info', help='web informations gathering',
-                        dest='webinfo', action='store_true')
-    parser.add_argument('-d', '--domain-info', help='subdomains informations gathering',
-                        dest='subdomains', action='store_true')
-    parser.add_argument('--dns', help='dns informations gatherings',
-                        dest='dnsdump', action='store_true')
+    def prepare_default_rays(self, device, elevation=0):
+        
+        from kiui.cam import orbit_camera
+        from core.utils import get_rays
 
-    return parser.parse_args()
+        cam_poses = np.stack([
+            orbit_camera(elevation, 0, radius=self.opt.cam_radius),
+            orbit_camera(elevation, 90, radius=self.opt.cam_radius),
+            orbit_camera(elevation, 180, radius=self.opt.cam_radius),
+            orbit_camera(elevation, 270, radius=self.opt.cam_radius),
+        ], axis=0) # [4, 4, 4]
+        cam_poses = torch.from_numpy(cam_poses)
 
-# args declaration
-args = parse_args()
-# url arg
-url = args.url
-# input_file
-input_file = args.input_file
-# Disable SSL related warnings
-warnings.filterwarnings('ignore')
+        rays_embeddings = []
+        for i in range(cam_poses.shape[0]):
+            rays_o, rays_d = get_rays(cam_poses[i], self.opt.input_size, self.opt.input_size, self.opt.fovy) # [h, w, 3]
+            rays_plucker = torch.cat([torch.cross(rays_o, rays_d, dim=-1), rays_d], dim=-1) # [h, w, 6]
+            rays_embeddings.append(rays_plucker)
 
-def detection():
-    instance = CMS(
-        url,
-        headers=headers,
-        exploit=args.exploit,
-        domain=args.subdomains,
-        webinfo=args.webinfo,
-        serveros=True,
-        cmsinfo=args.cms,
-        dnsdump=args.dnsdump,
-        port=args.scanports
-            )
-    instance.instanciate()
+            ## visualize rays for plotting figure
+            # kiui.vis.plot_image(rays_d * 0.5 + 0.5, save=True)
 
-def dork_engine():
-    if args.dorks:
-        DEngine = Dork(
-            exploit=args.dorks,
-            headers=headers,
-            pages=(args.numberpage or 1)
-            )
-        DEngine.search()
+        rays_embeddings = torch.stack(rays_embeddings, dim=0).permute(0, 3, 1, 2).contiguous().to(device) # [V, 6, h, w]
+        
+        return rays_embeddings
+        
 
-def dorks_manual():
-    if args.dorkslist:
-        DManual = DorkManual(
-            select=args.dorkslist
-            )
-        DManual.list()
+    def forward_gaussians(self, images):
+        # images: [B, 4, 9, H, W]
+        # return: Gaussians: [B, dim_t]
 
-def interactive_cli():
-    if args.cli:
-        cli = CLI(headers=headers)
-        cli.general("")
+        B, V, C, H, W = images.shape
+        images = images.view(B*V, C, H, W)
 
-def signal_handler(signal, frame):
-    print("%s(ID: {}) Cleaning up...\n Exiting...".format(signal) % (W))
-    exit(0)
+        x = self.unet(images) # [B*4, 14, h, w]
+        x = self.conv(x) # [B*4, 14, h, w]
 
-signal.signal(signal.SIGINT, signal_handler)
+        x = x.reshape(B, 4, 14, self.opt.splat_size, self.opt.splat_size)
+        
+        ## visualize multi-view gaussian features for plotting figure
+        # tmp_alpha = self.opacity_act(x[0, :, 3:4])
+        # tmp_img_rgb = self.rgb_act(x[0, :, 11:]) * tmp_alpha + (1 - tmp_alpha)
+        # tmp_img_pos = self.pos_act(x[0, :, 0:3]) * 0.5 + 0.5
+        # kiui.vis.plot_image(tmp_img_rgb, save=True)
+        # kiui.vis.plot_image(tmp_img_pos, save=True)
 
-if __name__ == "__main__":
+        x = x.permute(0, 1, 3, 4, 2).reshape(B, -1, 14)
+        
+        pos = self.pos_act(x[..., 0:3]) # [B, N, 3]
+        opacity = self.opacity_act(x[..., 3:4])
+        scale = self.scale_act(x[..., 4:7])
+        rotation = self.rot_act(x[..., 7:11])
+        rgbs = self.rgb_act(x[..., 11:])
 
-    headers = {
-        'User-Agent': random_UserAgent(),
-        'Content-type' : '*/*',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Connection': 'keep-alive',
-    }
-    dork_engine()
-    dorks_manual()
-    interactive_cli()
-    if url:
-        root = url
-        if root.startswith('http://'):
-            url = root
-        elif root.startswith('https://'):
-            url=root.replace('https://','http://')
-        else:
-            url = 'http://'+root
-            print(url)
-        detection()
+        gaussians = torch.cat([pos, opacity, scale, rotation, rgbs], dim=-1) # [B, N, 14]
+        
+        return gaussians
+
+    
+    def forward(self, data, step_ratio=1):
+        # data: output of the dataloader
+        # return: loss
+
+        results = {}
+        loss = 0
+
+        images = data['input'] # [B, 4, 9, h, W], input features
+        
+        # use the first view to predict gaussians
+        gaussians = self.forward_gaussians(images) # [B, N, 14]
+
+        results['gaussians'] = gaussians
+
+        # always use white bg
+        bg_color = torch.ones(3, dtype=torch.float32, device=gaussians.device)
+        
+        # use the other views for rendering and supervision
+        results = self.gs.render(gaussians, data['cam_view'], data['cam_view_proj'], data['cam_pos'], bg_color=bg_color)
+        pred_images = results['image'] # [B, V, C, output_size, output_size]
+        pred_alphas = results['alpha'] # [B, V, 1, output_size, output_size]
+
+        results['images_pred'] = pred_images
+        results['alphas_pred'] = pred_alphas
+
+        gt_images = data['images_output'] # [B, V, 3, output_size, output_size], ground-truth novel views
+        gt_masks = data['masks_output'] # [B, V, 1, output_size, output_size], ground-truth masks
+
+        gt_images = gt_images * gt_masks + bg_color.view(1, 1, 3, 1, 1) * (1 - gt_masks)
+
+        loss_mse = F.mse_loss(pred_images, gt_images) + F.mse_loss(pred_alphas, gt_masks)
+        loss = loss + loss_mse
+
+        if self.opt.lambda_lpips > 0:
+            loss_lpips = self.lpips_loss(
+                # gt_images.view(-1, 3, self.opt.output_size, self.opt.output_size) * 2 - 1,
+                # pred_images.view(-1, 3, self.opt.output_size, self.opt.output_size) * 2 - 1,
+                # downsampled to at most 256 to reduce memory cost
+                F.interpolate(gt_images.view(-1, 3, self.opt.output_size, self.opt.output_size) * 2 - 1, (256, 256), mode='bilinear', align_corners=False), 
+                F.interpolate(pred_images.view(-1, 3, self.opt.output_size, self.opt.output_size) * 2 - 1, (256, 256), mode='bilinear', align_corners=False),
+            ).mean()
+            results['loss_lpips'] = loss_lpips
+            loss = loss + self.opt.lambda_lpips * loss_lpips
+            
+        results['loss'] = loss
+
+        # metric
+        with torch.no_grad():
+            psnr = -10 * torch.log10(torch.mean((pred_images.detach() - gt_images) ** 2))
+            results['psnr'] = psnr
+
+        return results

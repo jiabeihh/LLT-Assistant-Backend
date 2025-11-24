@@ -57,24 +57,17 @@ def load_model(model_path):
     return model
 
 
-def classify(model, input_paths, image_dim=IMAGE_DIM, predict_args={}):
-    """
-    Classify given a model, input paths (could be single string), and image dimensionality.
-    
-    Optionally, pass predict_args that will be passed to tf.keras.Model.predict().
-    """
+def classify(model, input_paths, image_dim=IMAGE_DIM):
+    """ Classify given a model, input paths (could be single string), and image dimensionality...."""
     images, image_paths = load_images(input_paths, (image_dim, image_dim))
-    probs = classify_nd(model, images, predict_args)
+    probs = classify_nd(model, images)
     return dict(zip(image_paths, probs))
 
 
-def classify_nd(model, nd_images, predict_args={}):
-    """
-    Classify given a model, image array (numpy)
-    
-    Optionally, pass predict_args that will be passed to tf.keras.Model.predict().
-    """
-    model_preds = model.predict(nd_images, **predict_args)
+def classify_nd(model, nd_images):
+    """ Classify given a model, image array (numpy)...."""
+
+    model_preds = model.predict(nd_images)
     # preds = np.argsort(model_preds, axis = 1).tolist()
     
     categories = ['drawings', 'hentai', 'neutral', 'porn', 'sexy']
