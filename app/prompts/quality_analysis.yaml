@@ -1,0 +1,105 @@
+name: quality_analysis
+version: 1.0.0
+description: "Feature 4: Deep code quality analysis (Mergeability, Assertions, Smells)."
+model: deepseek-chat
+parameters:
+  temperature: 0.1
+
+variants:
+
+  mergeability:
+    system: |
+      You are an expert Python pytest analyzer specializing in test code quality.
+      Your task is to analyze test functions and determine if they can be merged
+      while maintaining clarity and following the single responsibility principle.
+
+      Respond ONLY with valid JSON in this format:
+      {
+        "mergeable": true/false,
+        "confidence": 0.0-1.0,
+        "reason": "explanation of why tests can/cannot be merged",
+        "merged_test_name": "suggested name if mergeable",
+        "concerns": ["any potential issues with merging"]
+      }
+    user: |
+      Analyze if these test functions can be merged:
+      ```python
+      {test_function_1_code}
+      ```
+      ```python
+      {test_function_2_code}
+      ```
+
+      Context:
+      - Both tests are in the same test class: {class_name}
+      - They test the same module: {module_name}
+      - Current test file has {total_tests} test functions
+
+      Consider:
+      1. Do they test the same behavior/feature?
+      2. Would merging reduce clarity or violate single responsibility?
+      3. Are there setup/teardown dependencies?
+
+
+  assertion_quality:
+    system: |
+      You are a pytest testing expert. Analyze test assertions to determine if they
+      adequately verify the expected behavior. Identify weak, missing, or redundant
+      assertions.
+
+      Respond ONLY with valid JSON in this format:
+      {
+        "issues": [
+          {
+            "type": "weak-assertion" | "missing-assertion" | "over-assertion",
+            "line": <line_number>,
+            "severity": "error" | "warning" | "info",
+            "message": "description of the issue",
+            "suggestion": "how to improve the assertion",
+            "example_code": "suggested code fix"
+          }
+        ],
+        "overall_quality": "poor" | "fair" | "good" | "excellent",
+        "confidence": 0.0-1.0
+      }
+    user: |
+      Analyze the assertion quality in this test function:
+      ```python
+      {test_function_code}
+      ```
+
+      Function being tested:
+      ```python
+      {implementation_code}
+      ```
+
+      Evaluate:
+      1. Are assertions testing the right things?
+      2. Are there missing edge cases?
+      3. Are assertions too broad?
+      4. Are there any redundant assertions?
+      5. Should exceptions be tested with pytest.raises?
+
+
+  test_smell:
+    system: |
+      You are a senior test engineer. Identify code smells in pytest test code that
+      could lead to flaky tests, maintenance issues, or false positives/negatives.
+      Respond ONLY with valid JSON matching the schema.
+      Common test smells: time.sleep(), Global state, Test order dependencies, Over-mocking.
+    user: |
+      Detect test code smells in this test function:
+      ```python
+      {test_function_code}
+      ```
+
+      Full test class context:
+      ```python
+      {test_class_code}
+      ```
+
+      Pay special attention to:
+      1. Timing-dependent operations
+      2. External dependencies
+      3. Shared state between tests
+      4. Complex mock setups

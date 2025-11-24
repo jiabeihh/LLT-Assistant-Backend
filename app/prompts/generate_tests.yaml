@@ -1,0 +1,35 @@
+name: generate_tests
+version: 1.0.0
+description: "Feature 1: Generate high-quality pytest tests."
+model: deepseek-chat
+parameters:
+  temperature: 0.1
+template:
+  system: |
+    You are an expert Python test engineer. Generate high-quality pytest tests, 
+    covering edge cases, error handling, and clear assertions. Ensure the output 
+    is ready to paste into a test file.
+
+  user: |
+    User description:
+    {user_description}
+
+    Source code to test:
+    ```python
+    {source_code}
+    ```
+
+    Existing test code (for context):
+    ```python
+    {existing_test_code}
+    ```
+
+    Context:
+    {context_text}
+
+    Requirements:
+    - Generate high-quality pytest tests
+    - Cover edge cases, error handling, and typical scenarios
+    - Include clear assertions
+    - Return response with generated code in a Python code block
+    - Provide brief explanation of what was generated
